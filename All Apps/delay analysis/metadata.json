@@ -1,0 +1,6 @@
+{
+  "name": "Construction Contracts & Claims AI Analyst",
+  "description": "An AI-powered agent for construction delay analysis. It compares planned vs. as-built schedules using the As-Built vs. Planned method to generate a comprehensive Executive Report and Delay Analysis Claim for clients.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Construction Contracts AI Manager",
+  "description": "An AI agent that analyzes new construction contracts against a company's annotated clause database. Upload a new contract (PDF/DOCX) and a clause database (XLSX/CSV/JSON) to receive a detailed, clause-by-clause analysis with status and justifications.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
