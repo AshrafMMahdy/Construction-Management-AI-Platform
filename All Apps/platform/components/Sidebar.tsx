@@ -8,14 +8,9 @@ import { ScheduleIcon, ContractIcon, DelayIcon, ChevronDownIcon, PlusIcon, Build
 // Create this file at All Apps/DashboardApp/src/components/appUrls.ts
 // This is a simple map for your app URLs.
 export const APP_URLS = {
-  // Assuming your dashboard runs on port 3000
-  dashboard: 'http://localhost:3000',
-  // Assuming your 'baseline scheduler' app runs on port 3001
-  baselineScheduler: 'http://localhost:3001',
-  // Assuming your 'contracts analysis' app runs on port 3002
-  contractsAnalysis: 'http://localhost:3002',
-  // Assuming your 'delay analysis' app runs on port 3003
-  delayAnalysis: 'http://localhost:3003',
+  scheduling: 'https://aischeduler-alpha.vercel.app',
+  contracts: 'https://aicontracts-sandy.vercel.app',
+  delay: 'https://aidelay.vercel.app',
 };
 
 // --- (ORIGINAL CODE BELOW) ---
