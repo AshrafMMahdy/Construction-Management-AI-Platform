@@ -1,6 +1,0 @@
-{
-  "name": "AI Construction Scheduler (Multi-Agent) With Vercel Database",
-  "description": "A multi-agent system where local AI agents generate schedule proposals from historical data, which are then evaluated. A lead AI agent (Gemini) synthesizes these proposals into a final, optimized project schedule and narrative.",
-  "requestFramePermissions": [],
-  "prompt": ""
-}
