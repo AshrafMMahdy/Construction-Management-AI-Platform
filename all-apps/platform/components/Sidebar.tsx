@@ -8,7 +8,7 @@ import { ScheduleIcon, ContractIcon, DelayIcon, ChevronDownIcon, PlusIcon, Build
 // Create this file at All Apps/DashboardApp/src/components/appUrls.ts
 // This is a simple map for your app URLs.
 export const APP_URLS = {
-  baselineScheduler: 'https://aischeduler-alpha.vercel.app',
+  baselineScheduler: 'https://construction-management-ai-platform-sandy.vercel.app/',
   contractsAnalysis: 'https://aicontracts-sandy.vercel.app',
   delayAnalysis: 'https://aidelay.vercel.app',
 };
