@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, ChangeEvent, useRef, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { ResultsTable } from './components/ResultsTable';
@@ -66,7 +67,6 @@ function App() {
   const [progress, setProgress] = useState<ProgressStep[]>([]);
   const [error, setError] = useState<string | null>(null);
   
-  // --- Project Management State ---
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('new');
@@ -77,7 +77,6 @@ function App() {
   const isBusy = status !== 'idle';
   const isProcessing = status === 'analyzing' || status === 'searching';
 
-  // --- Project API Functions ---
   const listProjects = useCallback(async () => {
     try {
       const response = await fetch('/api/projects');
@@ -112,45 +111,47 @@ function App() {
     }
   };
 
-  const handleProjectSelection = useCallback(async (projectId: string) => {
+  const handleProjectSelection = useCallback(async (pathname: string) => {
     if (isDirty) {
       const discard = window.confirm("You have unsaved changes. Are you sure you want to switch projects? Your changes will be lost.");
-      if (!discard) {
-        return;
-      }
+      if (!discard) return;
     }
     
-    if (projectId === 'new' || projectId === 'placeholder') {
+    if (pathname === 'new' || pathname === 'placeholder') {
       return;
     }
 
-    setSelectedProjectId(projectId);
+    setSelectedProjectId(pathname);
     setStatus('loading');
     setError(null);
     try {
-      // The projectId is the pathname, which needs to be encoded for the URL path
-      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`);
+      const response = await fetch(`/api/projects/${encodeURIComponent(pathname)}`);
       if (!response.ok) throw new Error(`Failed to load project: ${response.statusText}`);
       
       const projectData: Project = await response.json();
       
       setCurrentProject(projectData);
-      setDatabaseFile(serializableToFile(projectData.databaseFile));
+      
+      const dbFile = projectData.historicalData && projectData.fileName
+          ? new File([projectData.historicalData], projectData.fileName, { type: 'application/json' })
+          : null;
+      setDatabaseFile(dbFile);
+
       setContractFile(serializableToFile(projectData.contractFile));
       setSearchQuery(projectData.searchQuery || '');
       setAnalysisResults(projectData.analysisResults);
       setSearchResults(projectData.searchResults);
-      setIsDirty(false); // Freshly loaded project is not dirty
+      setIsDirty(false);
     } catch (err: any) {
       setError(err.message || 'An unknown error occurred while loading the project.');
       resetState(true);
     } finally {
       setStatus('idle');
     }
-  }, [isDirty, projects]);
+  }, [isDirty]);
   
   const handleCreateNewProjectClick = () => {
-    if (selectedProjectId === 'new') return; // Already in create mode
+    if (selectedProjectId === 'new') return;
     if (isDirty) {
       const discard = window.confirm("You have unsaved changes. Are you sure you want to create a new project? Your changes will be lost.");
       if (!discard) return;
@@ -158,38 +159,37 @@ function App() {
     resetState(true);
   };
   
-    const handleDeleteProject = useCallback(async (projectToDelete: ProjectSummary) => {
-        const confirmed = window.confirm(`Are you sure you want to delete the project "${projectToDelete.name}"? This action cannot be undone.`);
-        if (!confirmed) return;
+  const handleDeleteProject = useCallback(async (projectToDelete: ProjectSummary) => {
+    const confirmed = window.confirm(`Are you sure you want to delete the project "${projectToDelete.name}"? This action cannot be undone.`);
+    if (!confirmed) return;
 
-        setStatus('deleting');
-        setError(null);
-        try {
-            // The project ID is the pathname, which must be encoded
-            const response = await fetch(`/api/projects/${encodeURIComponent(projectToDelete.id)}`, {
-                method: 'DELETE',
-            });
+    setStatus('deleting');
+    setError(null);
+    try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(projectToDelete.id)}`, {
+            method: 'DELETE',
+        });
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || 'Failed to delete project.');
-            }
-            
-            if (selectedProjectId === projectToDelete.id) {
-                resetState(true);
-            }
-            await listProjects();
-
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setStatus('idle');
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to delete project.');
         }
-    }, [listProjects, selectedProjectId]);
+        
+        if (selectedProjectId === projectToDelete.id) {
+            resetState(true);
+        }
+        await listProjects();
+
+    } catch (err: any) {
+        setError(err.message);
+    } finally {
+        setStatus('idle');
+    }
+  }, [listProjects, selectedProjectId]);
 
 
   const handleSaveProject = useCallback(async () => {
-    const isUpdating = !!currentProject?.id;
+    const isUpdating = !!currentProject;
     const projectName = isUpdating ? currentProject.name : newProjectName;
 
     if (!projectName?.trim()) {
@@ -200,31 +200,56 @@ function App() {
     setStatus('saving');
     setError(null);
     try {
-        const payload: Omit<Project, 'id'> = {
+        let historicalDataString: string | null = null;
+        if (databaseFile) {
+            try {
+                const parsedClauses = await parseDatabaseFile(databaseFile);
+                historicalDataString = JSON.stringify(parsedClauses, null, 2);
+            } catch (e: any) {
+                console.error("Could not parse database file for saving:", e);
+                setError(`Failed to parse the database file: ${e.message}. It will not be included in the saved project.`);
+                historicalDataString = null;
+            }
+        }
+        
+        const projectDataForBody = {
             name: projectName.trim(),
-            databaseFile: await fileToSerializable(databaseFile),
+            historicalData: historicalDataString,
+            fileName: databaseFile?.name || null,
             contractFile: await fileToSerializable(contractFile),
             searchQuery,
             analysisResults,
             searchResults,
+            projectInput: currentProject?.projectInput || { isNotInDb: false, description: "", selections: {} },
+            startDate: currentProject?.startDate || null,
+            agentOutputs: currentProject?.agentOutputs || [],
+            generatedSchedule: currentProject?.generatedSchedule || [],
+            generatedNarrative: currentProject?.generatedNarrative || null,
         };
 
-        let response: Response;
+        let body;
+        let url;
+        let method: 'POST' | 'PUT';
+
         if (isUpdating) {
-            // UPDATE existing project
-            response = await fetch(`/api/projects/${encodeURIComponent(currentProject.id!)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
+            url = `/api/projects/${encodeURIComponent(selectedProjectId)}`;
+            method = 'PUT';
+            body = JSON.stringify({
+                ...projectDataForBody,
+                id: currentProject.id,
+                createdAt: currentProject.createdAt,
             });
         } else {
-            // CREATE new project
-            response = await fetch('/api/projects', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
+            url = '/api/projects';
+            method = 'POST';
+            body = JSON.stringify(projectDataForBody);
         }
+
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body,
+        });
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
@@ -233,8 +258,13 @@ function App() {
 
         const savedSummary: ProjectSummary = await response.json();
         
-        const updatedProjectState: Project = { ...payload, id: savedSummary.id };
-        setCurrentProject(updatedProjectState);
+        const finalProjectState: Project = {
+            ...projectDataForBody,
+            id: isUpdating ? currentProject.id : savedSummary.createdAt,
+            createdAt: savedSummary.createdAt,
+        };
+        
+        setCurrentProject(finalProjectState);
         setSelectedProjectId(savedSummary.id);
         setNewProjectName('');
         setIsDirty(false);
@@ -246,7 +276,7 @@ function App() {
     } finally {
         setStatus('idle');
     }
-  }, [currentProject, newProjectName, databaseFile, contractFile, searchQuery, analysisResults, searchResults, listProjects]);
+  }, [currentProject, newProjectName, databaseFile, contractFile, searchQuery, analysisResults, searchResults, listProjects, selectedProjectId]);
 
   const handleFileSelect = (setter: React.Dispatch<React.SetStateAction<File | null>>) => (file: File) => {
       setter(file);
@@ -327,7 +357,6 @@ function App() {
         throw new Error("Could not extract any content from the contract file.");
       }
       
-      // === STEP 2: AI Analysis ===
       const analysisStepName = contractContent.type === 'image' 
         ? 'Performing OCR & analysis on scanned document...' 
         : 'Analyzing contract clauses...';
@@ -343,7 +372,6 @@ function App() {
       const results = await analyzeContract(contractContent, dbClauses);
       finishStep(1);
 
-      // === STEP 3: Generating final report (with 1s fake delay) ===
       setProgress(prev => {
           const updated = [...prev];
           updated[2].status = 'in-progress';
@@ -443,7 +471,6 @@ function App() {
             });
         };
 
-        // === STEP 1: Reading contract file ===
         startFakeProgress(0);
         const contractContent = await parseContractFile(contractFile);
         finishStep(0);
@@ -452,7 +479,6 @@ function App() {
             throw new Error("Could not extract any content from the contract file.");
         }
 
-        // === STEP 2: AI Searching ===
         const searchStepName = contractContent.type === 'image'
             ? 'AI performing OCR & searching scanned document...'
             : 'AI searching for relevant clauses...';
@@ -468,7 +494,6 @@ function App() {
         const results = await searchContract(contractContent, searchQuery);
         finishStep(1);
 
-        // === STEP 3: Compiling results (with 1s fake delay) ===
         setProgress(prev => {
             const updated = [...prev];
             updated[2].status = 'in-progress';
@@ -550,11 +575,11 @@ function App() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-4">
                             <h2 className="text-xl font-semibold text-gray-100 flex items-center"><DatabaseIcon className="w-6 h-6 mr-2 text-blue-400" />Step 1: Upload Clause Database</h2>
-                            <FileUpload onFileSelect={handleFileSelect(setDatabaseFile)} acceptedFormats=".xlsx, .csv, .json" title="Clause Database" fileName={databaseFile?.name} key={`db-upload-${currentProject?.id || 'new'}`} />
+                            <FileUpload onFileSelect={handleFileSelect(setDatabaseFile)} acceptedFormats=".xlsx, .csv, .json" title="Clause Database" fileName={databaseFile?.name} key={`db-upload-${selectedProjectId}`} />
                         </div>
                         <div className="space-y-4">
                             <h2 className="text-xl font-semibold text-gray-100 flex items-center"><ContractIcon className="w-6 h-6 mr-2 text-blue-400" />Step 2: Upload New Contract</h2>
-                            <FileUpload onFileSelect={handleFileSelect(setContractFile)} acceptedFormats=".pdf, .docx" title="New Contract" fileName={contractFile?.name} key={`contract-upload-analysis-${currentProject?.id || 'new'}`} />
+                            <FileUpload onFileSelect={handleFileSelect(setContractFile)} acceptedFormats=".pdf, .docx" title="New Contract" fileName={contractFile?.name} key={`contract-upload-analysis-${selectedProjectId}`} />
                         </div>
                         </div>
                         <div className="text-center">
@@ -567,7 +592,7 @@ function App() {
                     <div className="bg-slate-800 p-8 rounded-lg shadow-xl space-y-8">
                         <div className="space-y-4">
                             <h2 className="text-xl font-semibold text-gray-100 flex items-center"><ContractIcon className="w-6 h-6 mr-2 text-blue-400" />Step 1: Upload New Contract</h2>
-                            <FileUpload onFileSelect={handleFileSelect(setContractFile)} acceptedFormats=".pdf, .docx" title="New Contract" fileName={contractFile?.name} key={`contract-upload-search-${currentProject?.id || 'new'}`} />
+                            <FileUpload onFileSelect={handleFileSelect(setContractFile)} acceptedFormats=".pdf, .docx" title="New Contract" fileName={contractFile?.name} key={`contract-upload-search-${selectedProjectId}`} />
                         </div>
                         <div className="space-y-4">
                             <h2 className="text-xl font-semibold text-gray-100 flex items-center"><SearchIcon className="w-6 h-6 mr-2 text-blue-400" />Step 2: Describe what you're looking for</h2>
