@@ -73,6 +73,7 @@ export async function PUT(request: Request) {
         const updatedProject: Project = {
             ...originalProject,
             ...body,
+            appOrigin: 'delay-analysis', // <-- Ensure project source is correctly identified
             id, // Ensure ID is not changed
             updatedAt: new Date().toISOString(),
         };
