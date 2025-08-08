@@ -1,6 +1,0 @@
-{
-  "name": "Copy of AI Platform Hub",
-  "description": "A central database and management hub for an AI-driven platform. It simulates a shared backend where different applications can store and access project data for scheduling, contracts, and analysis.",
-  "requestFramePermissions": [],
-  "prompt": ""
-}
