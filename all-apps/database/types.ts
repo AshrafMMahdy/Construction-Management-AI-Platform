@@ -49,13 +49,6 @@ export type ImageContractContent = {
 
 export type ContractContent = TextContractContent | ImageContractContent;
 
-export interface ProjectSummary {
-    id: string; 
-    name: string;
-    createdAt: string;
-}
-
-
 // Scheduler App Types
 export interface ProjectInput {
   isNotInDb: boolean;
@@ -76,17 +69,68 @@ export interface ScheduleActivity {
   predecessors: string;
 }
 
+// Delay Analysis App Types
+export interface DocumentReference {
+  pageNumber: string;
+  paragraph: string;
+}
+
+export interface DelayFinding {
+  activity: string;
+  plannedStart: string;
+  plannedEnd: string;
+  actualStart: string;
+  actualEnd: string;
+  delayDays: number;
+  impact: string;
+}
+
+export interface SupportingDocument {
+  documentName: string;
+  referenceLink: string;
+  references: DocumentReference[];
+}
+
+export interface ReportData {
+  executiveSummary: string;
+  methodology: {
+    title: string;
+    description: string;
+  };
+  delayAnalysis: {
+    title: string;
+    findings: DelayFinding[];
+  };
+  claimSummary: {
+    title: string;
+    summary: string;
+  };
+  supportingDocuments: SupportingDocument[];
+}
+
+export interface AdditionalDocData {
+    name: string;
+    category: string;
+    content: string;
+}
+
+export type AppOrigin = 'delay-analysis' | 'scheduler' | 'contract-analysis';
+
+export type AnalysisMethod = 'as-built-vs-planned' | 'window-analysis' | 'time-impact-analysis';
+
 // The app's internal tab identifier
 export type Tab = 'dashboard' | 'schedules' | 'contracts' | 'delayAnalysis';
 
 
-// The unified project type that combines fields from both Scheduler and Contracts apps
+// The unified project type that combines fields from all apps
 export interface Project {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt?: string;
+  appOrigin?: AppOrigin;
 
-  // Common fields that might be used differently by each app
+  // Common fields
   historicalData: string | null;
   fileName: string | null;
 
@@ -102,4 +146,11 @@ export interface Project {
   searchQuery?: string | null;
   analysisResults?: AnalysisResult[] | null;
   searchResults?: SearchResult[] | null;
+  
+  // --- Delay Analysis Project Fields (optional) ---
+  scheduleData?: string;
+  scheduleFileName?: string;
+  analysisMethod?: AnalysisMethod;
+  additionalDocs?: AdditionalDocData[];
+  report?: ReportData | null;
 }
