@@ -220,11 +220,6 @@ function App() {
             searchQuery,
             analysisResults,
             searchResults,
-            projectInput: currentProject?.projectInput || { isNotInDb: false, description: "", selections: {} },
-            startDate: currentProject?.startDate || null,
-            agentOutputs: currentProject?.agentOutputs || [],
-            generatedSchedule: currentProject?.generatedSchedule || [],
-            generatedNarrative: currentProject?.generatedNarrative || null,
         };
 
         let body;
@@ -259,7 +254,7 @@ function App() {
         const savedSummary: ProjectSummary = await response.json();
         
         const finalProjectState: Project = {
-            ...projectDataForBody,
+            ...(projectDataForBody as any), // Cast to any to handle file object vs serialized object
             id: isUpdating ? currentProject.id : savedSummary.createdAt,
             createdAt: savedSummary.createdAt,
         };
