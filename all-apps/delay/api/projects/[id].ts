@@ -70,21 +70,25 @@ export async function PUT(request: Request) {
         if (!fetchRes.ok) throw new Error('Original project not found for update.');
         const originalProject: Project = await fetchRes.json();
 
-        const updatedProject: Project = {
-            ...originalProject,
-            ...body,
-            appOrigin: 'delay-analysis', // <-- Ensure project source is correctly identified
-            id, // Ensure ID is not changed
-            updatedAt: new Date().toISOString(),
-        };
+        // Create a mutable copy of the original project data
+        const mergedData: Project = { ...originalProject };
 
-        await put(`projects/${id}.json`, JSON.stringify(updatedProject), {
+        // Overwrite with new data from the request body
+        Object.assign(mergedData, body);
+
+        // Forcefully set critical metadata to ensure it's identified correctly
+        mergedData.appOrigin = 'delay-analysis';
+        mergedData.id = id;
+        mergedData.updatedAt = new Date().toISOString();
+
+
+        await put(`projects/${id}.json`, JSON.stringify(mergedData), {
             access: 'public',
             contentType: 'application/json',
             addRandomSuffix: false,
         });
 
-        return new Response(JSON.stringify(updatedProject), {
+        return new Response(JSON.stringify(mergedData), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
         });
