@@ -1,65 +1,114 @@
 
-import { put, list } from '@vercel/blob';
-import type { SavedProject } from '../../types';
+import { list, put } from '@vercel/blob';
+import type { Project, ProjectSummary } from '../../types';
 
-export const runtime = 'edge';
+// NOTE: This function runs on the default Serverless runtime for better compatibility with the list() function.
+// export const runtime = 'edge'; // Removed to use Serverless runtime
 
+// Helper to create a standardized error response
+const createErrorResponse = (message: string, status: number) => {
+    return new Response(JSON.stringify({ error: message }), { 
+        status, 
+        headers: { 'Content-Type': 'application/json' }
+    });
+};
+
+// GET /api/projects - Lists all projects
 export async function GET(request: Request): Promise<Response> {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        return createErrorResponse('Storage environment variables not configured.', 500);
+    }
     try {
-        const { blobs } = await list({ prefix: 'projects/', mode: 'folded' });
+        const { blobs } = await list({ prefix: 'projects/' });
         
         const projectBlobs = blobs.filter(blob => blob.pathname.endsWith('.json'));
 
-        const projects: (SavedProject | null)[] = await Promise.all(
-            projectBlobs.map(async (blob) => {
-                try {
-                    const response = await fetch(blob.url);
-                    if (!response.ok) {
-                        console.error(`Failed to fetch blob content from ${blob.url}: ${response.statusText}`);
-                        return null; 
-                    }
-                    return await response.json();
-                } catch (fetchError) {
-                    console.error(`Error fetching or parsing blob from ${blob.url}:`, fetchError);
+        const projectSummariesPromises = projectBlobs.map(async (blob): Promise<ProjectSummary | null> => {
+            try {
+                const response = await fetch(blob.url);
+                if (!response.ok) {
+                    console.error(`Failed to fetch blob content from ${blob.url}: ${response.statusText}`);
+                    return null; // Skip this blob if it can't be fetched
+                }
+                const project: Project = await response.json();
+                
+                // Validate that the fetched content looks like our project
+                if (typeof project.name !== 'string' || !project.id) {
+                    console.warn(`Blob at ${blob.url} is not a valid project file.`);
                     return null;
                 }
-            })
-        );
-        
-        const validProjects = projects.filter((p): p is SavedProject => p !== null);
 
-        return new Response(JSON.stringify(validProjects), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
+                return {
+                    id: blob.pathname, // The ID is always the pathname
+                    name: project.name, // The name comes from the file content, which is robust
+                    updatedAt: blob.uploadedAt.toISOString(),
+                };
+            } catch (fetchError) {
+                console.error(`Error fetching or parsing blob from ${blob.url}:`, fetchError);
+                return null; // Skip if parsing fails
+            }
         });
+        
+        const settledSummaries = await Promise.all(projectSummariesPromises);
+        const validSummaries = settledSummaries.filter((p): p is ProjectSummary => p !== null);
+
+        // Sort by most recently updated
+        validSummaries.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+        return new Response(JSON.stringify(validSummaries), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+        });
+
     } catch (error) {
         console.error('Error listing projects:', error);
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        return new Response(JSON.stringify({ error: 'Failed to fetch projects', details: errorMessage }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        return createErrorResponse('Failed to fetch projects.', 500);
     }
 }
 
+// POST /api/projects - Creates a new project
 export async function POST(request: Request): Promise<Response> {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        return createErrorResponse('Storage environment variables not configured.', 500);
+    }
     try {
-        const project = (await request.json()) as SavedProject;
-        if (!project.id || !project.name) {
-            return new Response(JSON.stringify({ error: 'Missing project id or name' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        const projectData = await request.json();
+
+        // Robust validation for the incoming new project data
+        if (!projectData || typeof projectData.name !== 'string' || projectData.name.trim() === '') {
+            return createErrorResponse('Project name is required and must be a non-empty string.', 400);
         }
 
-        const pathname = `projects/${project.id}.json`;
+        const typedProjectData = projectData as Omit<Project, 'id'>;
+        const projectName = typedProjectData.name.trim();
 
-        const blob = await put(pathname, JSON.stringify(project), {
+        const safeName = projectName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+        const pathname = `projects/${safeName}-${Date.now()}.json`;
+
+        // The full project data to save, now including its own ID/pathname
+        const finalProject: Project = { ...typedProjectData, name: projectName, id: pathname };
+
+        const blob = await put(pathname, JSON.stringify(finalProject), {
             access: 'public',
             contentType: 'application/json',
+            addRandomSuffix: false,
         });
 
-        return new Response(JSON.stringify(blob), {
+        const summary: ProjectSummary = {
+            id: blob.pathname,
+            name: projectName,
+            updatedAt: new Date().toISOString(),
+        };
+
+        return new Response(JSON.stringify(summary), {
             status: 201,
             headers: { 'Content-Type': 'application/json' },
         });
     } catch (error) {
         console.error('Error saving project:', error);
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        return new Response(JSON.stringify({ error: 'Failed to save project', details: errorMessage }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        if (error instanceof SyntaxError) {
+             return createErrorResponse('Invalid JSON format in request body.', 400);
+        }
+        return createErrorResponse('Failed to save project.', 500);
     }
 }
