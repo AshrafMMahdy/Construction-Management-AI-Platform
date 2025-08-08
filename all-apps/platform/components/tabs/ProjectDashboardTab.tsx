@@ -1,6 +1,6 @@
 import React from 'react';
 import { Project } from '../../types';
-import { ChartBarIcon, DocumentTextIcon, SparklesIcon, DatabaseIcon } from '../Icons';
+import { ChartBarIcon, DocumentTextIcon, SparklesIcon, DatabaseIcon, ExclamationTriangleIcon } from '../Icons';
 
 interface ProjectDashboardTabProps {
   project: Project;
@@ -9,6 +9,7 @@ interface ProjectDashboardTabProps {
 const ProjectDashboardTab: React.FC<ProjectDashboardTabProps> = ({ project }) => {
   const hasSchedulerData = !!project.projectInput;
   const hasContractsData = !!project.contractFile || !!project.analysisResults?.length;
+  const hasDelayAnalysisData = !!project.report;
 
   return (
     <div className="animate-fade-in space-y-8">
@@ -81,7 +82,20 @@ const ProjectDashboardTab: React.FC<ProjectDashboardTabProps> = ({ project }) =>
         </div>
       )}
 
-      {!hasSchedulerData && !hasContractsData && (
+      {hasDelayAnalysisData && (
+        <div className="space-y-8 pt-8 mt-8 border-t border-base-300">
+            <div>
+              <h3 className="text-xl font-bold text-base-content mb-4">Delay Analysis Stats</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <StatCard icon={<ExclamationTriangleIcon />} title="Delay Findings" value={(project.report?.delayAnalysis.findings || []).length.toString()} />
+                <StatCard icon={<SparklesIcon />} title="Analysis Method" value={project.analysisMethod?.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'N/A'} />
+                <StatCard icon={<DocumentTextIcon />} title="Supporting Docs" value={(project.report?.supportingDocuments || []).length.toString()} />
+              </div>
+            </div>
+        </div>
+      )}
+
+      {!hasSchedulerData && !hasContractsData && !hasDelayAnalysisData && (
          <div className="text-center py-16 bg-base-100 rounded-lg border-2 border-dashed border-base-300">
             <SparklesIcon className="mx-auto h-12 w-12 text-base-content-secondary" />
             <h3 className="mt-2 text-lg font-medium text-base-content">No data to display</h3>
