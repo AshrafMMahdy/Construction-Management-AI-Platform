@@ -7,14 +7,19 @@ interface DashboardViewProps {
   onSelectProject: (id: string) => void;
 }
 
+const getProjectDescription = (project: Project): string => {
+    if (project.projectInput?.description) return project.projectInput.description;
+    if (project.report) return "Delay Analysis Report";
+    if (project.analysisResults?.length) return "Contract Analysis Project";
+    if (project.generatedSchedule?.length) return "Baseline Schedule Project";
+    return "Project data synced from source";
+};
+
 const DashboardView: React.FC<DashboardViewProps> = ({ projects, onSelectProject }) => {
   const totalProjects = projects.length;
-  // Count projects that have schedule data
   const totalSchedules = projects.filter(p => p.generatedSchedule && p.generatedSchedule.length > 0).length;
-  // Count projects that have contract data
   const totalContracts = projects.filter(p => p.contractFile || (p.analysisResults && p.analysisResults.length > 0)).length;
-  // Delay analyses count remains static for now
-  const totalAnalyses = 0;
+  const totalAnalyses = projects.filter(p => p.report).length;
 
   return (
     <div className="animate-fade-in">
@@ -37,7 +42,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ projects, onSelectProject
                 <div className="flex justify-between items-center">
                   <div>
                     <h3 className="font-semibold text-brand-secondary text-lg">{project.name}</h3>
-                    <p className="text-sm text-base-content-secondary">{project.projectInput?.description || 'Contract project'}</p>
+                    <p className="text-sm text-base-content-secondary">{getProjectDescription(project)}</p>
                   </div>
                   <div className="text-sm text-base-content-secondary">
                     Created on {new Date(project.createdAt).toLocaleDateString()}
