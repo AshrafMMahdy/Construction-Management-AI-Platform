@@ -51,17 +51,29 @@ export interface FileObject {
 }
 
 export interface ProjectSummary {
-    id: string; // The pathname of the blob
+    id: string; // The full pathname of the blob, e.g., 'projects/2025-08-08T05:42:10.662Z.json'
     name: string;
-    updatedAt: string;
+    createdAt: string; // The ISO timestamp string
 }
 
+// Based on user's provided JSON structure from the "scheduler" app
 export interface Project {
-    id: string | null;
+    id: string; // ISO timestamp, e.g., "2025-08-08T05:42:10.662Z"
     name: string;
-    databaseFile: FileObject | null;
+    createdAt: string; // ISO timestamp, same as id
+
+    // Fields populated by the contract analysis app
+    historicalData: string | null; // Stringified JSON of the clause database (from databaseFile)
+    fileName: string | null;       // Name of the clause database file
     contractFile: FileObject | null;
     searchQuery: string | null;
     analysisResults: AnalysisResult[] | null;
     searchResults: SearchResult[] | null;
+
+    // Placeholder fields to match the scheduler app's format
+    projectInput: any | null;
+    startDate: string | null;
+    agentOutputs: any[] | null;
+    generatedSchedule: any[] | null;
+    generatedNarrative: string | null;
 }
