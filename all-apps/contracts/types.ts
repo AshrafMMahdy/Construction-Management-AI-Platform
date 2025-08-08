@@ -56,7 +56,6 @@ export interface ProjectSummary {
     createdAt: string; // The ISO timestamp string
 }
 
-// Based on user's provided JSON structure from the "scheduler" app
 export interface Project {
     id: string; // ISO timestamp, e.g., "2025-08-08T05:42:10.662Z"
     name: string;
@@ -69,11 +68,4 @@ export interface Project {
     searchQuery: string | null;
     analysisResults: AnalysisResult[] | null;
     searchResults: SearchResult[] | null;
-
-    // Placeholder fields to match the scheduler app's format
-    projectInput: any | null;
-    startDate: string | null;
-    agentOutputs: any[] | null;
-    generatedSchedule: any[] | null;
-    generatedNarrative: string | null;
 }
