@@ -1,8 +1,9 @@
+
 // This file is intended for a Vercel Serverless Function environment.
 // It uses the Vercel Blob SDK and standard Request/Response APIs.
 // @ts-ignore - Vercel Blob is available in the Vercel environment
 import { list, put } from '@vercel/blob';
-import { Project, ProjectSummary } from '../../types';
+import { Project, ProjectSummary, AppOrigin } from '../../types';
 
 export const runtime = 'edge';
 
@@ -18,17 +19,28 @@ export async function GET(request: Request) {
                     try {
                         const response = await fetch(blob.url, { cache: 'no-store' });
                         if (!response.ok) return null; // Skip if fetch fails
-                        const projectData: Partial<Project> = await response.json();
+                        const projectData: any = await response.json();
+                        
                         // Validate that id and name exist before creating the summary
                         if (projectData && typeof projectData.id === 'string' && typeof projectData.name === 'string') {
-                            return { id: projectData.id, name: projectData.name };
+                            let appOrigin: AppOrigin | undefined;
+                            if (projectData.appOrigin) {
+                                appOrigin = projectData.appOrigin;
+                            } else if (projectData.projectInput && projectData.generatedSchedule) {
+                                appOrigin = 'scheduler';
+                            } else if (projectData.contractFile && projectData.analysisResults) {
+                                appOrigin = 'contract-analysis';
+                            } else if (projectData.scheduleData) { // Fallback for older native projects
+                                appOrigin = 'delay-analysis';
+                            }
+                            return { id: projectData.id, name: projectData.name, appOrigin };
                         }
                         return null; // Skip if data is malformed
                     } catch {
                         return null; // Skip if parsing fails
                     }
                 })
-        )).filter((p): p is ProjectSummary => p !== null); // Filter out any nulls
+        )).filter((p: any): p is ProjectSummary => p !== null); // Filter out any nulls
 
         // Sort projects by name, alphabetically
         projects.sort((a, b) => a.name.localeCompare(b.name));
