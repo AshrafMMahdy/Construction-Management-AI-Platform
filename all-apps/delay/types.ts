@@ -51,6 +51,7 @@ export interface ProjectSummary {
 export type AnalysisMethod = 'as-built-vs-planned' | 'window-analysis' | 'time-impact-analysis';
 
 export interface Project extends ProjectSummary {
+    appOrigin?: 'delay-analysis' | 'scheduler'; // Add appOrigin to identify source
     createdAt: string;
     updatedAt: string;
     scheduleData: string;
