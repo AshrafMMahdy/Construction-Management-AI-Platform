@@ -65,6 +65,7 @@ export async function POST(request: Request) {
         const newProject: Project = {
             id,
             name: name.trim(),
+            appOrigin: 'delay-analysis', // <-- Identify the project source
             createdAt: now,
             updatedAt: now,
             scheduleData: data.scheduleData || '',
