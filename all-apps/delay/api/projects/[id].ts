@@ -1,8 +1,9 @@
+
 // This file is intended for a Vercel Serverless Function environment.
 // It uses the Vercel Blob SDK and standard Request/Response APIs.
 // @ts-ignore - Vercel Blob is available in the Vercel environment
 import { put, head } from '@vercel/blob';
-import { Project } from '../../types';
+import { Project, AdditionalDocData } from '../../types';
 
 export const runtime = 'edge';
 
@@ -23,27 +24,83 @@ export async function GET(request: Request) {
     }
     
     try {
-        // Vercel Blob SDK's head/get does not work with full URL, needs pathname
         const blob = await head(`projects/${id}.json`);
-        // We can fetch directly from the public URL, ensuring we don't get a cached version
         const response = await fetch(blob.url, { cache: 'no-store' });
 
         if (!response.ok) {
              return new Response(JSON.stringify({ message: 'Project not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
         }
 
-        const projectData: Project = await response.json();
-        return new Response(JSON.stringify(projectData), {
-            status: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-            },
-        });
+        const projectData: any = await response.json();
+        const headers = {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+        };
+
+        // Check for scheduler project format and normalize it
+        if (projectData.projectInput && projectData.generatedSchedule) {
+            const normalizedProject: Project = {
+                id: projectData.id,
+                name: projectData.name,
+                appOrigin: 'scheduler',
+                createdAt: projectData.createdAt,
+                updatedAt: projectData.createdAt, // No 'updatedAt' in source
+                scheduleData: projectData.historicalData || '',
+                scheduleFileName: projectData.fileName || '',
+                analysisMethod: 'as-built-vs-planned',
+                additionalDocs: [],
+                report: null,
+            };
+            return new Response(JSON.stringify(normalizedProject), { status: 200, headers });
+        }
+
+        // Check for contract analysis project format and normalize it
+        if (projectData.contractFile && projectData.analysisResults) {
+            let additionalDocs: AdditionalDocData[] = [];
+            try {
+                if (projectData.historicalData && typeof projectData.historicalData === 'string') {
+                    const clauses = JSON.parse(projectData.historicalData);
+                    if (Array.isArray(clauses)) {
+                        const content = clauses.map((c: any) => c.clauseText || '').join('\n\n---\n\n');
+                        additionalDocs.push({
+                            name: projectData.fileName || 'Contract Clauses.txt',
+                            category: 'Contract',
+                            content: content
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("Could not parse historicalData from contract project:", e);
+            }
+            
+            const normalizedProject: Project = {
+                id: projectData.id,
+                name: projectData.name,
+                appOrigin: 'contract-analysis',
+                createdAt: projectData.createdAt,
+                updatedAt: projectData.createdAt,
+                scheduleData: '',
+                scheduleFileName: '',
+                analysisMethod: 'as-built-vs-planned',
+                additionalDocs,
+                report: null,
+            };
+            return new Response(JSON.stringify(normalizedProject), { status: 200, headers });
+        }
+
+        // Default: Assume it's a native delay-analysis project and ensure fields
+        const nativeProject: Project = {
+            ...projectData,
+            analysisMethod: projectData.analysisMethod || 'as-built-vs-planned',
+            additionalDocs: projectData.additionalDocs || [],
+            report: projectData.report || null,
+            scheduleData: projectData.scheduleData || '',
+            scheduleFileName: projectData.scheduleFileName || ''
+        };
+        return new Response(JSON.stringify(nativeProject), { status: 200, headers });
 
     } catch (error: any) {
-        // The `head` method throws an error for 404s
-        if (error.status === 404) {
+        if (error.status === 404 || error.message.includes('404')) {
             return new Response(JSON.stringify({ message: 'Project not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
         }
         return new Response(JSON.stringify({ message: 'Failed to fetch project', error: error.message }), {
@@ -64,19 +121,28 @@ export async function PUT(request: Request) {
     try {
         const body = await request.json();
         
-        // Fetch existing project to preserve creation date
         const headBlob = await head(`projects/${id}.json`);
         const fetchRes = await fetch(headBlob.url, { cache: 'no-store' });
         if (!fetchRes.ok) throw new Error('Original project not found for update.');
-        const originalProject: Project = await fetchRes.json();
+        const originalProject: any = await fetchRes.json();
 
-        // Create a mutable copy of the original project data
-        const mergedData: Project = { ...originalProject };
+        const mergedData: Project = { 
+            id: originalProject.id,
+            name: originalProject.name,
+            createdAt: originalProject.createdAt,
+            appOrigin: 'delay-analysis',
+            updatedAt: new Date().toISOString(),
+            // Provide defaults for all fields to create a valid Project object
+            scheduleData: originalProject.scheduleData || '',
+            scheduleFileName: originalProject.scheduleFileName || '',
+            analysisMethod: originalProject.analysisMethod || 'as-built-vs-planned',
+            additionalDocs: originalProject.additionalDocs || [],
+            report: originalProject.report || null,
+        };
 
-        // Overwrite with new data from the request body
         Object.assign(mergedData, body);
 
-        // Forcefully set critical metadata to ensure it's identified correctly
+        // Ensure critical metadata is correct after merging
         mergedData.appOrigin = 'delay-analysis';
         mergedData.id = id;
         mergedData.updatedAt = new Date().toISOString();
