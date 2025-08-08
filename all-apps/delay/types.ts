@@ -27,7 +27,7 @@ export interface ReportData {
     description: string;
   };
   delayAnalysis: {
-    title: string;
+    title:string;
     findings: DelayFinding[];
   };
   claimSummary: {
@@ -43,15 +43,18 @@ export interface AdditionalDocData {
     content: string;
 }
 
+export type AppOrigin = 'delay-analysis' | 'scheduler' | 'contract-analysis';
+
 export interface ProjectSummary {
     id: string;
     name: string;
+    appOrigin?: AppOrigin;
 }
 
 export type AnalysisMethod = 'as-built-vs-planned' | 'window-analysis' | 'time-impact-analysis';
 
 export interface Project extends ProjectSummary {
-    appOrigin?: 'delay-analysis' | 'scheduler'; // Add appOrigin to identify source
+    appOrigin?: AppOrigin;
     createdAt: string;
     updatedAt: string;
     scheduleData: string;
