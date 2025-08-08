@@ -7,11 +7,26 @@ interface DashboardViewProps {
   onSelectProject: (id: string) => void;
 }
 
+const getProjectDescription = (project: Project): string => {
+  if (project.projectInput?.description) {
+    return project.projectInput.description;
+  }
+  const parts = [];
+  if (project.generatedSchedule?.length) parts.push('schedule data');
+  if (project.analysisResults?.length) parts.push('contract analysis');
+  if (project.report) parts.push('delay analysis');
+
+  if (parts.length === 0) {
+    return 'No detailed data available for this project.';
+  }
+  return `Contains ${parts.join(', ')}.`;
+};
+
 const DashboardView: React.FC<DashboardViewProps> = ({ projects, onSelectProject }) => {
   const totalProjects = projects.length;
   const totalSchedules = projects.filter(p => p.generatedSchedule && p.generatedSchedule.length > 0).length;
   const totalContracts = projects.filter(p => (p.analysisResults && p.analysisResults.length > 0) || p.contractFile).length;
-  const totalAnalyses = 0; // Delay analysis data model not yet integrated
+  const totalAnalyses = projects.filter(p => p.report).length;
 
   return (
     <div className="animate-fade-in">
@@ -35,7 +50,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ projects, onSelectProject
                   <div>
                     <h3 className="font-semibold text-brand-secondary text-lg">{project.name}</h3>
                     <p className="text-sm text-base-content-secondary">
-                      {project.projectInput?.description || 'Contains contract documents and analysis results.'}
+                      {getProjectDescription(project)}
                     </p>
                   </div>
                   <div className="text-sm text-base-content-secondary">
