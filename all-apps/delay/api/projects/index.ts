@@ -1,65 +1,94 @@
-
-import { put, list } from '@vercel/blob';
-import type { SavedProject } from '../../types';
+// This file is intended for a Vercel Serverless Function environment.
+// It uses the Vercel Blob SDK and standard Request/Response APIs.
+// @ts-ignore - Vercel Blob is available in the Vercel environment
+import { list, put } from '@vercel/blob';
+import { Project, ProjectSummary } from '../../types';
 
 export const runtime = 'edge';
 
-export async function GET(request: Request): Promise<Response> {
+// GET /api/projects - Lists all project summaries
+export async function GET(request: Request) {
     try {
         const { blobs } = await list({ prefix: 'projects/', mode: 'folded' });
-        
-        const projectBlobs = blobs.filter(blob => blob.pathname.endsWith('.json'));
 
-        const projects: (SavedProject | null)[] = await Promise.all(
-            projectBlobs.map(async (blob) => {
-                try {
-                    const response = await fetch(blob.url);
-                    if (!response.ok) {
-                        console.error(`Failed to fetch blob content from ${blob.url}: ${response.statusText}`);
-                        return null; 
+        const projects: ProjectSummary[] = (await Promise.all(
+            blobs
+                .filter(blob => blob.pathname.endsWith('.json'))
+                .map(async (blob) => {
+                    try {
+                        const response = await fetch(blob.url, { cache: 'no-store' });
+                        if (!response.ok) return null; // Skip if fetch fails
+                        const projectData: Partial<Project> = await response.json();
+                        // Validate that id and name exist before creating the summary
+                        if (projectData && typeof projectData.id === 'string' && typeof projectData.name === 'string') {
+                            return { id: projectData.id, name: projectData.name };
+                        }
+                        return null; // Skip if data is malformed
+                    } catch {
+                        return null; // Skip if parsing fails
                     }
-                    return await response.json();
-                } catch (fetchError) {
-                    console.error(`Error fetching or parsing blob from ${blob.url}:`, fetchError);
-                    return null;
-                }
-            })
-        );
-        
-        const validProjects = projects.filter((p): p is SavedProject => p !== null);
+                })
+        )).filter((p): p is ProjectSummary => p !== null); // Filter out any nulls
 
-        return new Response(JSON.stringify(validProjects), {
+        // Sort projects by name, alphabetically
+        projects.sort((a, b) => a.name.localeCompare(b.name));
+
+        return new Response(JSON.stringify(projects), {
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+            },
             status: 200,
+        });
+
+    } catch (error) {
+        return new Response(JSON.stringify({ message: 'Failed to list projects', error: (error as Error).message }), {
+            status: 500,
             headers: { 'Content-Type': 'application/json' },
         });
-    } catch (error) {
-        console.error('Error listing projects:', error);
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        return new Response(JSON.stringify({ error: 'Failed to fetch projects', details: errorMessage }), { status: 500, headers: { 'Content-Type': 'application/json' } });
     }
 }
 
-export async function POST(request: Request): Promise<Response> {
+// POST /api/projects - Creates a new project
+export async function POST(request: Request) {
     try {
-        const project = (await request.json()) as SavedProject;
-        if (!project.id || !project.name) {
-            return new Response(JSON.stringify({ error: 'Missing project id or name' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        const body = await request.json();
+        const { name, ...data } = body;
+        
+        if (!name || typeof name !== 'string' || name.trim() === '') {
+            return new Response(JSON.stringify({ message: 'Project name is required and cannot be empty.' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         }
+        
+        const id = crypto.randomUUID();
+        const now = new Date().toISOString();
+        
+        const newProject: Project = {
+            id,
+            name: name.trim(),
+            createdAt: now,
+            updatedAt: now,
+            scheduleData: data.scheduleData || '',
+            scheduleFileName: data.scheduleFileName || '',
+            analysisMethod: data.analysisMethod || 'as-built-vs-planned',
+            additionalDocs: data.additionalDocs || [],
+            report: data.report || null,
+        };
 
-        const pathname = `projects/${project.id}.json`;
-
-        const blob = await put(pathname, JSON.stringify(project), {
+        await put(`projects/${id}.json`, JSON.stringify(newProject), {
             access: 'public',
             contentType: 'application/json',
+            addRandomSuffix: false,
         });
 
-        return new Response(JSON.stringify(blob), {
+        return new Response(JSON.stringify(newProject), {
             status: 201,
             headers: { 'Content-Type': 'application/json' },
         });
+
     } catch (error) {
-        console.error('Error saving project:', error);
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        return new Response(JSON.stringify({ error: 'Failed to save project', details: errorMessage }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ message: 'Failed to create project', error: (error as Error).message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+        });
     }
 }
