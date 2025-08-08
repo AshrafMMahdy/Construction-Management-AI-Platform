@@ -2,9 +2,6 @@
 import { list, put } from '@vercel/blob';
 import type { Project, ProjectSummary } from '../../types';
 
-// NOTE: This function runs on the default Serverless runtime for better compatibility with the list() function.
-// export const runtime = 'edge'; // Removed to use Serverless runtime
-
 // Helper to create a standardized error response
 const createErrorResponse = (message: string, status: number) => {
     return new Response(JSON.stringify({ error: message }), { 
@@ -28,32 +25,31 @@ export async function GET(request: Request): Promise<Response> {
                 const response = await fetch(blob.url);
                 if (!response.ok) {
                     console.error(`Failed to fetch blob content from ${blob.url}: ${response.statusText}`);
-                    return null; // Skip this blob if it can't be fetched
+                    return null;
                 }
                 const project: Project = await response.json();
                 
-                // Validate that the fetched content looks like our project
-                if (typeof project.name !== 'string' || !project.id) {
+                if (typeof project.name !== 'string' || !project.id || !project.createdAt) {
                     console.warn(`Blob at ${blob.url} is not a valid project file.`);
                     return null;
                 }
 
                 return {
-                    id: blob.pathname, // The ID is always the pathname
-                    name: project.name, // The name comes from the file content, which is robust
-                    updatedAt: blob.uploadedAt.toISOString(),
+                    id: blob.pathname,
+                    name: project.name,
+                    createdAt: project.createdAt,
                 };
             } catch (fetchError) {
                 console.error(`Error fetching or parsing blob from ${blob.url}:`, fetchError);
-                return null; // Skip if parsing fails
+                return null;
             }
         });
         
         const settledSummaries = await Promise.all(projectSummariesPromises);
         const validSummaries = settledSummaries.filter((p): p is ProjectSummary => p !== null);
 
-        // Sort by most recently updated
-        validSummaries.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        // Sort by most recently created
+        validSummaries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
         return new Response(JSON.stringify(validSummaries), {
             status: 200,
@@ -72,21 +68,20 @@ export async function POST(request: Request): Promise<Response> {
         return createErrorResponse('Storage environment variables not configured.', 500);
     }
     try {
-        const projectData = await request.json();
+        const newProjectData = await request.json();
 
-        // Robust validation for the incoming new project data
-        if (!projectData || typeof projectData.name !== 'string' || projectData.name.trim() === '') {
+        if (!newProjectData || typeof newProjectData.name !== 'string' || newProjectData.name.trim() === '') {
             return createErrorResponse('Project name is required and must be a non-empty string.', 400);
         }
+        
+        const timestamp = new Date().toISOString();
+        const pathname = `projects/${timestamp}.json`;
 
-        const typedProjectData = projectData as Omit<Project, 'id'>;
-        const projectName = typedProjectData.name.trim();
-
-        const safeName = projectName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
-        const pathname = `projects/${safeName}-${Date.now()}.json`;
-
-        // The full project data to save, now including its own ID/pathname
-        const finalProject: Project = { ...typedProjectData, name: projectName, id: pathname };
+        const finalProject: Project = {
+            ...newProjectData,
+            id: timestamp,
+            createdAt: timestamp,
+        };
 
         const blob = await put(pathname, JSON.stringify(finalProject), {
             access: 'public',
@@ -96,8 +91,8 @@ export async function POST(request: Request): Promise<Response> {
 
         const summary: ProjectSummary = {
             id: blob.pathname,
-            name: projectName,
-            updatedAt: new Date().toISOString(),
+            name: finalProject.name,
+            createdAt: finalProject.createdAt,
         };
 
         return new Response(JSON.stringify(summary), {
