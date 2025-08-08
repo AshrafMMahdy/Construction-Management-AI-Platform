@@ -48,6 +48,53 @@ export interface SearchResult {
   relevant_portion: string;
 }
 
+// Types from the Delay Analysis application
+export interface DocumentReference {
+  pageNumber: string;
+  paragraph: string;
+}
+
+export interface DelayFinding {
+  activity: string;
+  plannedStart: string;
+  plannedEnd: string;
+  actualStart: string;
+  actualEnd: string;
+  delayDays: number;
+  impact: string;
+}
+
+export interface SupportingDocument {
+  documentName: string;
+  referenceLink: string;
+  references: DocumentReference[];
+}
+
+export interface ReportData {
+  executiveSummary: string;
+  methodology: {
+    title: string;
+    description: string;
+  };
+  delayAnalysis: {
+    title:string;
+    findings: DelayFinding[];
+  };
+  claimSummary: {
+    title: string;
+    summary: string;
+  };
+  supportingDocuments: SupportingDocument[];
+}
+
+export interface AdditionalDocData {
+    name: string;
+    category: string;
+    content: string;
+}
+
+export type AnalysisMethod = 'as-built-vs-planned' | 'window-analysis' | 'time-impact-analysis';
+
 
 /**
  * A unified project that can contain data from either the Scheduler,
@@ -59,6 +106,7 @@ export interface Project {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt?: string;
 
   // Fields from Baseline Scheduler
   projectInput?: ProjectInput;
@@ -72,6 +120,12 @@ export interface Project {
   searchQuery?: string | null;
   analysisResults?: AnalysisResult[] | null;
   searchResults?: SearchResult[] | null;
+
+  // Fields from Delay Analysis
+  analysisMethod?: AnalysisMethod;
+  additionalDocs?: AdditionalDocData[];
+  report?: ReportData | null;
+  scheduleFileName?: string;
 
   // Common but potentially ambiguous fields, used by both
   historicalData?: string | null;
