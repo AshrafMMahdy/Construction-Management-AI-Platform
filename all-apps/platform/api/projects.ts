@@ -3,10 +3,11 @@
 
 // Type definitions are duplicated here to make the serverless function self-contained,
 // avoiding potential path resolution issues during the Vercel build process.
+// --- Contract Analysis Types ---
 interface FileObject {
-  name: string;
-  type: string;
-  dataUrl: string;
+    name: string;
+    type: string;
+    dataUrl: string;
 }
 interface AnalysisResult {
   contract_clause_index: number;
@@ -21,6 +22,8 @@ interface SearchResult {
   contract_clause_text: string;
   relevant_portion: string;
 }
+
+// --- Scheduler App Types ---
 interface ProjectInput {
   isNotInDb: boolean;
   description: string;
@@ -34,7 +37,7 @@ interface ScheduleActivity {
   predecessors: string;
 }
 
-// Types from the Delay Analysis application
+// --- Delay Analysis App Types ---
 interface DocumentReference {
   pageNumber: string;
   paragraph: string;
@@ -60,7 +63,7 @@ interface ReportData {
     description: string;
   };
   delayAnalysis: {
-    title:string;
+    title: string;
     findings: DelayFinding[];
   };
   claimSummary: {
@@ -74,42 +77,86 @@ interface AdditionalDocData {
     category: string;
     content: string;
 }
+type AppOrigin = 'delay-analysis' | 'scheduler' | 'contract-analysis';
 type AnalysisMethod = 'as-built-vs-planned' | 'window-analysis' | 'time-impact-analysis';
 
-/**
- * A unified project that can contain data from either the Scheduler,
- * Contracts, or other apps. Fields are optional to accommodate different
- * project sources.
- */
+
+// --- Unified Project Type ---
 interface Project {
-  // Common fields required in all projects
   id: string;
   name: string;
   createdAt: string;
   updatedAt?: string;
-
-  // Fields from Baseline Scheduler
+  appOrigin?: AppOrigin;
+  historicalData: string | null;
+  fileName: string | null;
+  // Scheduler fields
   projectInput?: ProjectInput;
   startDate?: string;
   agentOutputs?: AgentOutput[];
   generatedSchedule?: ScheduleActivity[];
   generatedNarrative?: string;
-  
-  // Fields from Contracts Analysis
+  // Contract fields
   contractFile?: FileObject | null;
   searchQuery?: string | null;
   analysisResults?: AnalysisResult[] | null;
   searchResults?: SearchResult[] | null;
-
-  // Fields from Delay Analysis
+  // Delay Analysis fields
+  scheduleData?: string;
+  scheduleFileName?: string;
   analysisMethod?: AnalysisMethod;
   additionalDocs?: AdditionalDocData[];
   report?: ReportData | null;
-  scheduleFileName?: string;
+}
 
-  // Common but potentially ambiguous fields
-  historicalData?: string | null;
-  fileName?: string | null;
+/**
+ * Recursively scans a project object and merges data from nested app-specific objects.
+ * This function identifies nested data by looking for objects that contain keys unique
+ * to one of the platform's applications (e.g., `analysisResults`, `generatedSchedule`).
+ * The properties of the outer (newer) layer always take precedence over the inner (older) layers.
+ * @param {any} data The raw project data from the JSON blob.
+ * @returns {Project} A single, fully flattened Project object.
+ */
+function processProjectData(data: any): Project {
+    let finalProject = { ...data };
+
+    // A set of keys that are unique to specific applications. Their presence within a nested
+    // object is a strong indicator that the object is a container for another app's data.
+    const projectDataKeys = new Set([
+      'projectInput', 'generatedSchedule', 'agentOutputs', // Scheduler keys
+      'contractFile', 'analysisResults', 'searchResults', // Contracts keys
+      'scheduleData', 'additionalDocs', 'report'         // Delay Analysis keys
+    ]);
+
+    for (const key in finalProject) {
+        // We only care about own properties, not inherited ones.
+        if (Object.prototype.hasOwnProperty.call(finalProject, key)) {
+            const value = finalProject[key];
+
+            // Check if the property is a plain object (not an array, not null).
+            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                const valueKeys = Object.keys(value);
+                // Check if this object contains any of our app-specific data keys.
+                const isNestedProjectData = valueKeys.some(k => projectDataKeys.has(k));
+
+                if (isNestedProjectData) {
+                    // This looks like a container for another app's data.
+                    // Recursively process it first to handle multiple levels of nesting.
+                    const flattenedNested = processProjectData(value);
+                    
+                    // Merge the data. The spread order `{ ...flattenedNested, ...finalProject }`
+                    // is crucial: it ensures that properties from the outer (more recent)
+                    // object overwrite any conflicting properties from the nested (older) object.
+                    finalProject = { ...flattenedNested, ...finalProject };
+                    
+                    // Clean up by deleting the original container key (e.g., 'contractAnalysis').
+                    delete finalProject[key];
+                }
+            }
+        }
+    }
+
+    return finalProject as Project;
 }
 
 
@@ -177,13 +224,16 @@ export default async function handler(request: Request) {
         
         const projects: Project[] = [];
         settledResults.forEach((result: PromiseSettledResult<any>, index) => {
-            if (result.status === 'fulfilled') {
-                if (result.value && result.value.id && result.value.name) {
-                    projects.push(result.value as Project);
+            if (result.status === 'fulfilled' && result.value) {
+                // Process the project data to handle all known nesting structures.
+                const projectData = processProjectData(result.value);
+                
+                if (projectData && projectData.id && projectData.name) {
+                    projects.push(projectData);
                 } else {
-                    console.warn(`File ${projectBlobs[index].pathname} was fetched but seems to have invalid content.`, result.value);
+                    console.warn(`File ${projectBlobs[index].pathname} was fetched but has invalid content after processing.`, projectData);
                 }
-            } else {
+            } else if (result.status === 'rejected') {
                 console.error(`Failed to fetch or parse project from ${projectBlobs[index].pathname}:`, result.reason);
             }
         });
