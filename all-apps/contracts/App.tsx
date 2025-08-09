@@ -7,7 +7,7 @@ import { AnalysisProgress } from './components/AnalysisProgress';
 import { ContractIcon, DatabaseIcon, SearchIcon } from './components/icons';
 import { parseContractFile, parseDatabaseFile } from './services/fileParser';
 import { analyzeContract, searchContract } from './services/geminiService';
-import { AnalysisResult, SearchResult, Project, ProjectSummary, FileObject } from './types';
+import { AnalysisResult, SearchResult, Project, ProjectSummary, FileObject, ContractAnalysisData } from './types';
 import { SearchResultsTable } from './components/SearchResultsTable';
 import { Sidebar } from './components/Sidebar';
 
@@ -131,16 +131,19 @@ function App() {
       const projectData: Project = await response.json();
       
       setCurrentProject(projectData);
+
+      // Extract this app's data module
+      const contractData = projectData.contractAnalysis;
       
-      const dbFile = projectData.historicalData && projectData.fileName
-          ? new File([projectData.historicalData], projectData.fileName, { type: 'application/json' })
+      const dbFile = contractData?.historicalData && contractData.fileName
+          ? new File([contractData.historicalData], contractData.fileName, { type: 'application/json' })
           : null;
       setDatabaseFile(dbFile);
 
-      setContractFile(serializableToFile(projectData.contractFile));
-      setSearchQuery(projectData.searchQuery || '');
-      setAnalysisResults(projectData.analysisResults);
-      setSearchResults(projectData.searchResults);
+      setContractFile(serializableToFile(contractData?.contractFile || null));
+      setSearchQuery(contractData?.searchQuery || '');
+      setAnalysisResults(contractData?.analysisResults || null);
+      setSearchResults(contractData?.searchResults || null);
       setIsDirty(false);
     } catch (err: any) {
       setError(err.message || 'An unknown error occurred while loading the project.');
@@ -212,8 +215,7 @@ function App() {
             }
         }
         
-        const projectDataForBody = {
-            name: projectName.trim(),
+        const contractAnalysisData: ContractAnalysisData = {
             historicalData: historicalDataString,
             fileName: databaseFile?.name || null,
             contractFile: await fileToSerializable(contractFile),
@@ -222,28 +224,31 @@ function App() {
             searchResults,
         };
 
-        let body;
-        let url;
+        let projectDataForApi: Partial<Project>;
+        let url: string;
         let method: 'POST' | 'PUT';
 
         if (isUpdating) {
             url = `/api/projects/${encodeURIComponent(selectedProjectId)}`;
             method = 'PUT';
-            body = JSON.stringify({
-                ...projectDataForBody,
-                id: currentProject.id,
-                createdAt: currentProject.createdAt,
-            });
+            projectDataForApi = {
+                ...currentProject,
+                name: projectName.trim(),
+                contractAnalysis: contractAnalysisData,
+            };
         } else {
             url = '/api/projects';
             method = 'POST';
-            body = JSON.stringify(projectDataForBody);
+            projectDataForApi = {
+                name: projectName.trim(),
+                contractAnalysis: contractAnalysisData,
+            };
         }
 
         const response = await fetch(url, {
             method,
             headers: { 'Content-Type': 'application/json' },
-            body,
+            body: JSON.stringify(projectDataForApi),
         });
 
         if (!response.ok) {
@@ -254,7 +259,7 @@ function App() {
         const savedSummary: ProjectSummary = await response.json();
         
         const finalProjectState: Project = {
-            ...(projectDataForBody as any), // Cast to any to handle file object vs serialized object
+            ...(projectDataForApi as Project),
             id: isUpdating ? currentProject.id : savedSummary.createdAt,
             createdAt: savedSummary.createdAt,
         };
