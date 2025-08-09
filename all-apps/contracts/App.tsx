@@ -128,22 +128,29 @@ function App() {
       const response = await fetch(`/api/projects/${encodeURIComponent(pathname)}`);
       if (!response.ok) throw new Error(`Failed to load project: ${response.statusText}`);
       
-      const projectData: Project = await response.json();
-      
+      const projectData: Project & { [key: string]: any } = await response.json();
       setCurrentProject(projectData);
 
-      // Extract this app's data module
-      const contractData = projectData.contractAnalysis;
+      // Determine the source of contract analysis data for backward compatibility
+      let dataToLoad: ContractAnalysisData | undefined | null = null;
+
+      if (projectData.contractAnalysis) {
+        // New, modular format
+        dataToLoad = projectData.contractAnalysis;
+      } else if ('analysisResults' in projectData || 'contractFile' in projectData) {
+        // Old format from this app (heuristic check)
+        dataToLoad = projectData as unknown as ContractAnalysisData;
+      }
       
-      const dbFile = contractData?.historicalData && contractData.fileName
-          ? new File([contractData.historicalData], contractData.fileName, { type: 'application/json' })
+      const dbFile = dataToLoad?.historicalData && dataToLoad.fileName
+          ? new File([dataToLoad.historicalData], dataToLoad.fileName, { type: 'application/json' })
           : null;
       setDatabaseFile(dbFile);
 
-      setContractFile(serializableToFile(contractData?.contractFile || null));
-      setSearchQuery(contractData?.searchQuery || '');
-      setAnalysisResults(contractData?.analysisResults || null);
-      setSearchResults(contractData?.searchResults || null);
+      setContractFile(serializableToFile(dataToLoad?.contractFile || null));
+      setSearchQuery(dataToLoad?.searchQuery || '');
+      setAnalysisResults(dataToLoad?.analysisResults || null);
+      setSearchResults(dataToLoad?.searchResults || null);
       setIsDirty(false);
     } catch (err: any) {
       setError(err.message || 'An unknown error occurred while loading the project.');
