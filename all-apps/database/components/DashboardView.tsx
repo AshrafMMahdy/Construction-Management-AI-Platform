@@ -8,10 +8,15 @@ interface DashboardViewProps {
 }
 
 const getProjectDescription = (project: Project): string => {
+    const parts: string[] = [];
+    if (project.generatedSchedule && project.generatedSchedule.length > 0) parts.push("Schedule Data");
+    if (project.analysisResults && project.analysisResults.length > 0) parts.push("Contract Analysis");
+    if (project.report) parts.push("Delay Report");
+
+    if (parts.length > 0) return parts.join(' / ');
+    
     if (project.projectInput?.description) return project.projectInput.description;
-    if (project.report) return "Delay Analysis Report";
-    if (project.analysisResults?.length) return "Contract Analysis Project";
-    if (project.generatedSchedule?.length) return "Baseline Schedule Project";
+    
     return "Project data synced from source";
 };
 
