@@ -75,6 +75,7 @@ export async function PUT(request: Request): Promise<Response> {
             access: 'public',
             contentType: 'application/json',
             addRandomSuffix: false, // Must not change the name on update
+            allowOverwrite: true,
         });
 
         const summary: ProjectSummary = {
