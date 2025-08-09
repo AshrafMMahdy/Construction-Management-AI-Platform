@@ -109,6 +109,33 @@ interface Project {
   report?: ReportData | null;
 }
 
+/**
+ * Recursively flattens a nested project structure.
+ * When an app saves over a project from another app, it can create a `project` property
+ * containing the original data. This function merges them, with the outer-level
+ * (newer) data taking precedence for conflicting keys.
+ * @param {any} data The raw project data from the JSON blob.
+ * @returns {Project} A single, flattened Project object.
+ */
+function flattenProjectData(data) {
+  let finalProject = { ...data };
+  let current = data;
+
+  // Traverse down the nested 'project' properties
+  while (current && typeof current.project === 'object' && current.project !== null) {
+    const nestedProject = current.project;
+    // Merge nested project into the final object. The properties of finalProject (the newer ones)
+    // will overwrite the older, nested ones if there are conflicts.
+    finalProject = { ...nestedProject, ...finalProject };
+    current = nestedProject;
+  }
+  
+  // Clean up any lingering 'project' property from the final merged object.
+  delete finalProject.project;
+
+  return finalProject;
+}
+
 
 // Use the Edge runtime for faster responses.
 export const config = {
@@ -174,13 +201,16 @@ export default async function handler(request: Request) {
         
         const projects: Project[] = [];
         settledResults.forEach((result: PromiseSettledResult<any>, index) => {
-            if (result.status === 'fulfilled') {
-                if (result.value && result.value.id && result.value.name) {
-                    projects.push(result.value as Project);
+            if (result.status === 'fulfilled' && result.value) {
+                // Flatten the project data to handle nested structures where one app saves over another's data.
+                const projectData = flattenProjectData(result.value);
+                
+                if (projectData && projectData.id && projectData.name) {
+                    projects.push(projectData as Project);
                 } else {
-                    console.warn(`File ${projectBlobs[index].pathname} was fetched but seems to have invalid content.`, result.value);
+                    console.warn(`File ${projectBlobs[index].pathname} was fetched but has invalid content after flattening.`, projectData);
                 }
-            } else {
+            } else if (result.status === 'rejected') {
                 console.error(`Failed to fetch or parse project from ${projectBlobs[index].pathname}:`, result.reason);
             }
         });
