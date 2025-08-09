@@ -111,7 +111,7 @@ interface Project {
 
 /**
  * Recursively scans a project object and flattens any nested objects that look like projects.
- * An object is considered a "project" if it has `id`, `name`, and `createdAt` properties.
+ * An object is considered a "project" if it has `id` and `createdAt` properties.
  * This dynamically handles nesting from any app saving data over another.
  * The properties of the outer (newer) layer always take precedence over the inner (older) layers.
  * @param {any} data The raw project data from the JSON blob.
@@ -124,13 +124,16 @@ function processProjectData(data: any): Project {
         if (Object.prototype.hasOwnProperty.call(finalProject, key)) {
             const value = finalProject[key];
 
-            // Check if the property value is an object that has the signature of a Project
+            // Check if the property value is an object that has the signature of a Project.
+            // Relaxed the check to not require 'name', as some apps might not nest it.
+            // Added a check for `typeof value.id === 'string'` to avoid matching other objects
+            // with a numeric `id` field (like schedule activities).
             if (
                 typeof value === 'object' &&
                 value !== null &&
                 !Array.isArray(value) &&
                 'id' in value &&
-                'name' in value &&
+                typeof value.id === 'string' &&
                 'createdAt' in value
             ) {
                 // It's a nested project. Recursively flatten it first.
