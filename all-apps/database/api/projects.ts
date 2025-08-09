@@ -110,9 +110,9 @@ interface Project {
 }
 
 /**
- * Recursively scans a project object and flattens any nested objects that look like projects.
- * An object is considered a "project" if it has `id` and `createdAt` properties.
- * This dynamically handles nesting from any app saving data over another.
+ * Recursively scans a project object and merges data from nested app-specific objects.
+ * This function identifies nested data by looking for objects that contain keys unique
+ * to one of the platform's applications (e.g., `analysisResults`, `generatedSchedule`).
  * The properties of the outer (newer) layer always take precedence over the inner (older) layers.
  * @param {any} data The raw project data from the JSON blob.
  * @returns {Project} A single, fully flattened Project object.
@@ -120,31 +120,38 @@ interface Project {
 function processProjectData(data: any): Project {
     let finalProject = { ...data };
 
+    // A set of keys that are unique to specific applications. Their presence within a nested
+    // object is a strong indicator that the object is a container for another app's data.
+    const projectDataKeys = new Set([
+      'projectInput', 'generatedSchedule', 'agentOutputs', // Scheduler keys
+      'contractFile', 'analysisResults', 'searchResults', // Contracts keys
+      'scheduleData', 'additionalDocs', 'report'         // Delay Analysis keys
+    ]);
+
     for (const key in finalProject) {
+        // We only care about own properties, not inherited ones.
         if (Object.prototype.hasOwnProperty.call(finalProject, key)) {
             const value = finalProject[key];
 
-            // Check if the property value is an object that has the signature of a Project.
-            // Relaxed the check to not require 'name', as some apps might not nest it.
-            // Added a check for `typeof value.id === 'string'` to avoid matching other objects
-            // with a numeric `id` field (like schedule activities).
-            if (
-                typeof value === 'object' &&
-                value !== null &&
-                !Array.isArray(value) &&
-                'id' in value &&
-                typeof value.id === 'string' &&
-                'createdAt' in value
-            ) {
-                // It's a nested project. Recursively flatten it first.
-                const flattenedNested = processProjectData(value);
-                
-                // Merge the flattened nested object. The outer object's properties (`finalProject`)
-                // will overwrite the nested ones, preserving the most recent data.
-                finalProject = { ...flattenedNested, ...finalProject };
-                
-                // Delete the original nested property key to clean up the final object
-                delete finalProject[key];
+            // Check if the property is a plain object (not an array, not null).
+            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                const valueKeys = Object.keys(value);
+                // Check if this object contains any of our app-specific data keys.
+                const isNestedProjectData = valueKeys.some(k => projectDataKeys.has(k));
+
+                if (isNestedProjectData) {
+                    // This looks like a container for another app's data.
+                    // Recursively process it first to handle multiple levels of nesting.
+                    const flattenedNested = processProjectData(value);
+                    
+                    // Merge the data. The spread order `{ ...flattenedNested, ...finalProject }`
+                    // is crucial: it ensures that properties from the outer (more recent)
+                    // object overwrite any conflicting properties from the nested (older) object.
+                    finalProject = { ...flattenedNested, ...finalProject };
+                    
+                    // Clean up by deleting the original container key (e.g., 'contractAnalysis').
+                    delete finalProject[key];
+                }
             }
         }
     }
