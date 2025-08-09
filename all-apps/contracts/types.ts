@@ -56,16 +56,20 @@ export interface ProjectSummary {
     createdAt: string; // The ISO timestamp string
 }
 
+export interface ContractAnalysisData {
+    historicalData: string | null;
+    fileName: string | null;
+    contractFile: FileObject | null;
+    searchQuery: string | null;
+    analysisResults: AnalysisResult[] | null;
+    searchResults: SearchResult[] | null;
+}
+
 export interface Project {
     id: string; // ISO timestamp, e.g., "2025-08-08T05:42:10.662Z"
     name: string;
     createdAt: string; // ISO timestamp, same as id
 
-    // Fields populated by the contract analysis app
-    historicalData: string | null; // Stringified JSON of the clause database (from databaseFile)
-    fileName: string | null;       // Name of the clause database file
-    contractFile: FileObject | null;
-    searchQuery: string | null;
-    analysisResults: AnalysisResult[] | null;
-    searchResults: SearchResult[] | null;
+    // App-specific data modules
+    contractAnalysis?: ContractAnalysisData;
 }
