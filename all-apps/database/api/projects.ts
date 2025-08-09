@@ -110,30 +110,43 @@ interface Project {
 }
 
 /**
- * Recursively flattens a nested project structure.
- * When an app saves over a project from another app, it can create a `project` property
- * containing the original data. This function merges them, with the outer-level
- * (newer) data taking precedence for conflicting keys.
+ * Recursively scans a project object and flattens any nested objects that look like projects.
+ * An object is considered a "project" if it has `id`, `name`, and `createdAt` properties.
+ * This dynamically handles nesting from any app saving data over another.
+ * The properties of the outer (newer) layer always take precedence over the inner (older) layers.
  * @param {any} data The raw project data from the JSON blob.
- * @returns {Project} A single, flattened Project object.
+ * @returns {Project} A single, fully flattened Project object.
  */
-function flattenProjectData(data) {
-  let finalProject = { ...data };
-  let current = data;
+function processProjectData(data: any): Project {
+    let finalProject = { ...data };
 
-  // Traverse down the nested 'project' properties
-  while (current && typeof current.project === 'object' && current.project !== null) {
-    const nestedProject = current.project;
-    // Merge nested project into the final object. The properties of finalProject (the newer ones)
-    // will overwrite the older, nested ones if there are conflicts.
-    finalProject = { ...nestedProject, ...finalProject };
-    current = nestedProject;
-  }
-  
-  // Clean up any lingering 'project' property from the final merged object.
-  delete finalProject.project;
+    for (const key in finalProject) {
+        if (Object.prototype.hasOwnProperty.call(finalProject, key)) {
+            const value = finalProject[key];
 
-  return finalProject;
+            // Check if the property value is an object that has the signature of a Project
+            if (
+                typeof value === 'object' &&
+                value !== null &&
+                !Array.isArray(value) &&
+                'id' in value &&
+                'name' in value &&
+                'createdAt' in value
+            ) {
+                // It's a nested project. Recursively flatten it first.
+                const flattenedNested = processProjectData(value);
+                
+                // Merge the flattened nested object. The outer object's properties (`finalProject`)
+                // will overwrite the nested ones, preserving the most recent data.
+                finalProject = { ...flattenedNested, ...finalProject };
+                
+                // Delete the original nested property key to clean up the final object
+                delete finalProject[key];
+            }
+        }
+    }
+
+    return finalProject as Project;
 }
 
 
@@ -202,13 +215,13 @@ export default async function handler(request: Request) {
         const projects: Project[] = [];
         settledResults.forEach((result: PromiseSettledResult<any>, index) => {
             if (result.status === 'fulfilled' && result.value) {
-                // Flatten the project data to handle nested structures where one app saves over another's data.
-                const projectData = flattenProjectData(result.value);
+                // Process the project data to handle all known nesting structures.
+                const projectData = processProjectData(result.value);
                 
                 if (projectData && projectData.id && projectData.name) {
-                    projects.push(projectData as Project);
+                    projects.push(projectData);
                 } else {
-                    console.warn(`File ${projectBlobs[index].pathname} was fetched but has invalid content after flattening.`, projectData);
+                    console.warn(`File ${projectBlobs[index].pathname} was fetched but has invalid content after processing.`, projectData);
                 }
             } else if (result.status === 'rejected') {
                 console.error(`Failed to fetch or parse project from ${projectBlobs[index].pathname}:`, result.reason);
