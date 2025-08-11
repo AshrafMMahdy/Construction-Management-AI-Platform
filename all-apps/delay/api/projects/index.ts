@@ -30,7 +30,7 @@ export async function GET(request: Request) {
                                 appOrigin = 'scheduler';
                             } else if (projectData.contractFile && projectData.analysisResults) {
                                 appOrigin = 'contract-analysis';
-                            } else if (projectData.scheduleData) { // Fallback for older native projects
+                            } else if (projectData.scheduleData || projectData.delayAnalysisData) { // Check for old or new format
                                 appOrigin = 'delay-analysis';
                             }
                             return { id: projectData.id, name: projectData.name, appOrigin };
@@ -74,26 +74,42 @@ export async function POST(request: Request) {
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
         
-        const newProject: Project = {
+        const projectFile = {
             id,
             name: name.trim(),
-            appOrigin: 'delay-analysis', // <-- Identify the project source
+            appOrigin: 'delay-analysis',
             createdAt: now,
             updatedAt: now,
-            scheduleData: data.scheduleData || '',
-            scheduleFileName: data.scheduleFileName || '',
-            analysisMethod: data.analysisMethod || 'as-built-vs-planned',
-            additionalDocs: data.additionalDocs || [],
-            report: data.report || null,
+            delayAnalysisData: {
+                scheduleData: data.scheduleData || '',
+                scheduleFileName: data.scheduleFileName || '',
+                analysisMethod: data.analysisMethod || 'as-built-vs-planned',
+                additionalDocs: data.additionalDocs || [],
+                report: data.report || null,
+            }
         };
 
-        await put(`projects/${id}.json`, JSON.stringify(newProject), {
+        await put(`projects/${id}.json`, JSON.stringify(projectFile), {
             access: 'public',
             contentType: 'application/json',
             addRandomSuffix: false,
         });
+        
+        // The client expects a flat Project structure, so we normalize the response.
+        const responseProject: Project = {
+            id: projectFile.id,
+            name: projectFile.name,
+            appOrigin: 'delay-analysis',
+            createdAt: now,
+            updatedAt: now,
+            scheduleData: projectFile.delayAnalysisData.scheduleData,
+            scheduleFileName: projectFile.delayAnalysisData.scheduleFileName,
+            analysisMethod: projectFile.delayAnalysisData.analysisMethod,
+            additionalDocs: projectFile.delayAnalysisData.additionalDocs,
+            report: projectFile.delayAnalysisData.report,
+        };
 
-        return new Response(JSON.stringify(newProject), {
+        return new Response(JSON.stringify(responseProject), {
             status: 201,
             headers: { 'Content-Type': 'application/json' },
         });
