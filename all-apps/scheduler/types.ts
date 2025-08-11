@@ -68,17 +68,20 @@ export interface ProgressUpdate {
   newName?: string;
 }
 
-export interface SavedProject {
-  id: string;
-  name: string;
-  createdAt: string;
-  // Core inputs
+export interface AiSchedulerData {
   historicalData: string;
   fileName: string;
   projectInput: ProjectInput;
   startDate: string;
-  // Generated outputs
   agentOutputs: AgentOutput[];
   generatedSchedule: Activity[];
   generatedNarrative: string;
+}
+
+export interface SavedProject {
+  id: string;
+  name: string;
+  createdAt: string;
+  aiSchedulerData?: AiSchedulerData;
+  [key: string]: any; // Allow other app data
 }
