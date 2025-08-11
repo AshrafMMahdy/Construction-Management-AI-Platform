@@ -38,11 +38,7 @@ export async function PUT(request: Request): Promise<Response> {
     }
     
     try {
-        const { name: newName } = await request.json() as { name: string };
-        if (!newName || typeof newName !== 'string' || !newName.trim()) {
-            return new Response(JSON.stringify({ error: 'New name is invalid' }), { status: 400, headers: { 'Content-Type': 'application/json' }});
-        }
-
+        const updatedProjectData = await request.json() as Partial<SavedProject>;
         const blobUrl = `${process.env.BLOB_URL}/${pathname}`;
         
         const response = await fetch(blobUrl);
@@ -53,12 +49,19 @@ export async function PUT(request: Request): Promise<Response> {
             return new Response(JSON.stringify({ error: `Failed to fetch existing project data (status: ${response.status})` }), { status: 500, headers: { 'Content-Type': 'application/json' }});
         }
 
-        const project = await response.json() as SavedProject;
-        project.name = newName.trim();
+        const existingProject = await response.json() as SavedProject;
+        
+        // Merge the existing project with the updates.
+        // New data from the request body takes precedence, preserving other apps' data.
+        const newProjectState: SavedProject = {
+            ...existingProject,
+            ...updatedProjectData,
+        };
 
-        const updatedBlob = await put(pathname, JSON.stringify(project), {
+        const updatedBlob = await put(pathname, JSON.stringify(newProjectState), {
             access: 'public',
             contentType: 'application/json',
+            allowOverwrite: true, // Explicitly allow overwriting the blob
         });
 
         return new Response(JSON.stringify(updatedBlob), {
