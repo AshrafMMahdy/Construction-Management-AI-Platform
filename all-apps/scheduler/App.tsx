@@ -398,50 +398,73 @@ const App: React.FC = () => {
   };
 
   const handleLoadProject = (projectId: string) => {
-      const projectToLoad = savedProjects.find(p => p.id === projectId);
-      if (projectToLoad && !isLoading) {
-          resetAllState();
-          try {
-              const schedulerData = projectToLoad.aiSchedulerData;
+    const projectToLoad = savedProjects.find(p => p.id === projectId);
+    if (projectToLoad && !isLoading) {
+        resetAllState();
+        try {
+            // Robustly find the scheduler data
+            let schedulerData: AiSchedulerData | undefined | null = null;
 
-              if (!schedulerData) {
-                setError(`Project "${projectToLoad.name}" does not contain AI Scheduler data. This file might be from another application or an older version. You can start a new schedule generation for this project.`);
-                setProjectName(projectToLoad.name);
-                setCurrentProjectId(projectToLoad.id);
-                setHistoricalData(null);
-                setFileName(null);
-                setProjectFeatures(null);
-                return; 
-              }
-              
-              const { features } = parseDataAndExtractFeatures(schedulerData.historicalData, schedulerData.fileName);
-              
-              setHistoricalData(schedulerData.historicalData);
-              setFileName(schedulerData.fileName);
-              setProjectFeatures(features);
+            // Case 1: Modern format with nested aiSchedulerData object
+            if (projectToLoad.aiSchedulerData && typeof projectToLoad.aiSchedulerData === 'object') {
+                schedulerData = projectToLoad.aiSchedulerData;
+            } 
+            // Case 2: Legacy format with scheduler data at the top level of the project object
+            else if (projectToLoad.historicalData && projectToLoad.generatedSchedule) {
+                // Type assertion to treat the legacy project object as AiSchedulerData
+                schedulerData = projectToLoad as unknown as AiSchedulerData;
+            }
+
+            // Case 3: No valid scheduler data found
+            if (!schedulerData) {
+              setError(`Project "${projectToLoad.name}" does not contain AI Scheduler data. This file might be from another application or an older version. You can start a new schedule generation for this project.`);
               setProjectName(projectToLoad.name);
-              setProjectInput(schedulerData.projectInput);
-              setStartDate(schedulerData.startDate);
-              setAgentOutputs(schedulerData.agentOutputs);
-              setGeneratedSchedule(schedulerData.generatedSchedule);
-              setGeneratedNarrative(schedulerData.generatedNarrative);
-              
-              if (schedulerData.generatedSchedule && schedulerData.generatedSchedule.length > 0) {
-                  const calculatedGanttData = calculateScheduleWithMetrics(schedulerData.generatedSchedule, schedulerData.startDate);
-                  setGanttData(calculatedGanttData);
-                  calculateAndSetDuration(calculatedGanttData);
-                  setView('gantt');
-              }
-
               setCurrentProjectId(projectToLoad.id);
-          } catch(e) {
-              if (e instanceof Error) {
-                  setError(`Error loading project: ${e.message}`);
-              } else {
-                  setError('An unknown error occurred while loading the project.');
-              }
-          }
-      }
+              // Clear out any potential scheduler-related state
+              setHistoricalData(null);
+              setFileName(null);
+              setProjectFeatures(null);
+              setProjectInput(initialProjectInput);
+              setAgentOutputs(null);
+              setGeneratedSchedule(null);
+              setGeneratedNarrative(null);
+              setGanttData(null);
+              return; 
+            }
+            
+            // If we found scheduler data, proceed to load it into the app state
+            const { features } = parseDataAndExtractFeatures(schedulerData.historicalData, schedulerData.fileName);
+            
+            setHistoricalData(schedulerData.historicalData);
+            setFileName(schedulerData.fileName);
+            setProjectFeatures(features);
+            setProjectName(projectToLoad.name);
+            // Ensure projectInput is valid, providing a default if missing from legacy data
+            setProjectInput(schedulerData.projectInput || initialProjectInput);
+            setStartDate(schedulerData.startDate || new Date().toISOString().split('T')[0]);
+            setAgentOutputs(schedulerData.agentOutputs || null);
+            setGeneratedSchedule(schedulerData.generatedSchedule || null);
+            setGeneratedNarrative(schedulerData.generatedNarrative || null);
+            
+            if (schedulerData.generatedSchedule && schedulerData.generatedSchedule.length > 0) {
+                const calculatedGanttData = calculateScheduleWithMetrics(schedulerData.generatedSchedule, schedulerData.startDate);
+                setGanttData(calculatedGanttData);
+                calculateAndSetDuration(calculatedGanttData);
+                setView('gantt');
+            }
+
+            setCurrentProjectId(projectToLoad.id);
+        } catch(e) {
+            if (e instanceof Error) {
+                setError(`Error loading project: ${e.message}`);
+            } else {
+                setError('An unknown error occurred while loading the project.');
+            }
+            // Also reset core project identifiers if loading fails catastrophically
+            setProjectName(projectToLoad.name);
+            setCurrentProjectId(projectToLoad.id);
+        }
+    }
   };
 
   const handleDeleteProject = async (projectId: string) => {
@@ -462,14 +485,22 @@ const App: React.FC = () => {
 
   const handleRenameProject = async (projectId: string, newName: string) => {
     try {
+        const existingProject = savedProjects.find(p => p.id === projectId);
+        if (!existingProject) {
+            throw new Error("Project not found in local state");
+        }
+        const updatedProject = { ...existingProject, name: newName };
+
         const response = await fetch(`/api/projects/${projectId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newName }),
+            body: JSON.stringify(updatedProject),
         });
+
         if (!response.ok) {
             throw new Error(`Failed to rename project: ${response.statusText}`);
         }
+        
         setSavedProjects(savedProjects.map(p => 
             p.id === projectId ? { ...p, name: newName } : p
         ));
