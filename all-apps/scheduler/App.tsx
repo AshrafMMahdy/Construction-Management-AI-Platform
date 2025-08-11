@@ -1,6 +1,5 @@
-
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Activity, AgentOutput, ProjectInput, ProjectFeatures, ProgressStep, ProgressUpdate, GanttActivity, SavedProject } from './types';
+import { Activity, AgentOutput, ProjectInput, ProjectFeatures, ProgressStep, ProgressUpdate, GanttActivity, SavedProject, AiSchedulerData } from './types';
 import FileUpload from './components/FileUpload';
 import ProjectForm from './components/ProjectForm';
 import ScheduleTable from './components/ScheduleTable';
@@ -235,8 +234,6 @@ const App: React.FC = () => {
         calculateAndSetDuration(calculatedGanttData);
         setView('gantt');
       }
-      // Don't reset currentProjectId here, so user can see it's a new unsaved project
-      setCurrentProjectId(null); 
 
     } catch (err) {
       if (err instanceof Error) {
@@ -297,7 +294,6 @@ const App: React.FC = () => {
         calculateAndSetDuration(calculatedGanttData);
         setView('gantt');
       }
-      setCurrentProjectId(null); // This is a modified generation, should be re-saved
 
     } catch (err) {
       if (err instanceof Error) {
@@ -312,21 +308,21 @@ const App: React.FC = () => {
     }
   };
     
-  const handleSaveProject = async () => {
+  const handleSaveOrUpdateProject = async () => {
       if (!generatedSchedule || !generatedNarrative || !agentOutputs || !historicalData || !fileName) {
           setError("Not enough data to save the project.");
           return false;
       }
-
+  
       if (!projectName.trim()){
           setError("Please enter a project name before saving.");
           return false;
       }
-
-      const newProject: SavedProject = {
-          id: new Date().toISOString(),
-          name: projectName.trim(),
-          createdAt: new Date().toISOString(),
+  
+      setIsLoading(true);
+      setError(null);
+  
+      const aiSchedulerData: AiSchedulerData = {
           historicalData,
           fileName,
           projectInput,
@@ -335,24 +331,69 @@ const App: React.FC = () => {
           generatedSchedule,
           generatedNarrative,
       };
-
+  
       try {
-        const response = await fetch('/api/projects', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newProject),
-        });
-        if (!response.ok) {
-            throw new Error(`Failed to save project: ${response.statusText}`);
-        }
-        setSavedProjects(prev => [...prev, newProject]);
-        setCurrentProjectId(newProject.id);
-        setError(null);
-        return true;
+          if (currentProjectId) {
+              // --- UPDATE EXISTING PROJECT ---
+              const existingProject = savedProjects.find(p => p.id === currentProjectId);
+              if (!existingProject) {
+                  setError("Consistency error: Cannot find current project in list to update.");
+                  setIsLoading(false);
+                  return false;
+              }
+              
+              const updatedProject: SavedProject = {
+                  ...existingProject,
+                  name: projectName.trim(),
+                  aiSchedulerData: aiSchedulerData
+              };
+              
+              const response = await fetch(`/api/projects/${currentProjectId}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(updatedProject),
+              });
+              
+              if (!response.ok) {
+                  throw new Error(`Failed to update project: ${response.statusText}`);
+              }
+  
+              const savedBlob = await response.json();
+              
+              setSavedProjects(prev => prev.map(p => p.id === currentProjectId ? { ...updatedProject, url: savedBlob.url } : p));
+              
+          } else {
+              // --- CREATE NEW PROJECT ---
+              const newProject: SavedProject = {
+                  id: new Date().toISOString(),
+                  name: projectName.trim(),
+                  createdAt: new Date().toISOString(),
+                  aiSchedulerData: aiSchedulerData,
+              };
+  
+              const response = await fetch('/api/projects', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(newProject),
+              });
+
+              if (!response.ok) {
+                  throw new Error(`Failed to save project: ${response.statusText}`);
+              }
+              
+              const savedBlob = await response.json();
+              const projectWithUrl = { ...newProject, url: savedBlob.url };
+  
+              setSavedProjects(prev => [...prev, projectWithUrl]);
+              setCurrentProjectId(projectWithUrl.id);
+          }
+          return true;
       } catch (e) {
-          console.error("Failed to save project to blob", e);
+          console.error("Failed to save or update project", e);
           setError("Cloud not save project. Please try again.");
           return false;
+      } finally {
+          setIsLoading(false);
       }
   };
 
@@ -361,20 +402,32 @@ const App: React.FC = () => {
       if (projectToLoad && !isLoading) {
           resetAllState();
           try {
-              const { features } = parseDataAndExtractFeatures(projectToLoad.historicalData, projectToLoad.fileName);
+              const schedulerData = projectToLoad.aiSchedulerData;
+
+              if (!schedulerData) {
+                setError(`Project "${projectToLoad.name}" does not contain AI Scheduler data. This file might be from another application or an older version. You can start a new schedule generation for this project.`);
+                setProjectName(projectToLoad.name);
+                setCurrentProjectId(projectToLoad.id);
+                setHistoricalData(null);
+                setFileName(null);
+                setProjectFeatures(null);
+                return; 
+              }
               
-              setHistoricalData(projectToLoad.historicalData);
-              setFileName(projectToLoad.fileName);
+              const { features } = parseDataAndExtractFeatures(schedulerData.historicalData, schedulerData.fileName);
+              
+              setHistoricalData(schedulerData.historicalData);
+              setFileName(schedulerData.fileName);
               setProjectFeatures(features);
               setProjectName(projectToLoad.name);
-              setProjectInput(projectToLoad.projectInput);
-              setStartDate(projectToLoad.startDate);
-              setAgentOutputs(projectToLoad.agentOutputs);
-              setGeneratedSchedule(projectToLoad.generatedSchedule);
-              setGeneratedNarrative(projectToLoad.generatedNarrative);
+              setProjectInput(schedulerData.projectInput);
+              setStartDate(schedulerData.startDate);
+              setAgentOutputs(schedulerData.agentOutputs);
+              setGeneratedSchedule(schedulerData.generatedSchedule);
+              setGeneratedNarrative(schedulerData.generatedNarrative);
               
-              if (projectToLoad.generatedSchedule && projectToLoad.generatedSchedule.length > 0) {
-                  const calculatedGanttData = calculateScheduleWithMetrics(projectToLoad.generatedSchedule, projectToLoad.startDate);
+              if (schedulerData.generatedSchedule && schedulerData.generatedSchedule.length > 0) {
+                  const calculatedGanttData = calculateScheduleWithMetrics(schedulerData.generatedSchedule, schedulerData.startDate);
                   setGanttData(calculatedGanttData);
                   calculateAndSetDuration(calculatedGanttData);
                   setView('gantt');
@@ -438,7 +491,7 @@ const App: React.FC = () => {
   };
 
   const handleConfirmSaveAndReset = async () => {
-    const savedSuccessfully = await handleSaveProject();
+    const savedSuccessfully = await handleSaveOrUpdateProject();
     if (savedSuccessfully) {
         handleResetForNewProject();
     }
@@ -533,11 +586,10 @@ const App: React.FC = () => {
                         value={projectName}
                         onChange={(e) => setProjectName(e.target.value)}
                         placeholder="Enter a unique name for this project"
-                        disabled={isLoading || !!currentProjectId}
+                        disabled={isLoading}
                         className="w-full p-2 bg-brand-primary border-2 border-brand-muted rounded-md focus:outline-none focus:border-brand-accent transition-colors text-brand-light placeholder-brand-muted disabled:opacity-50 disabled:cursor-not-allowed"
                         aria-label="New project name"
                     />
-                    {!!currentProjectId && <p className="text-xs text-brand-muted mt-1">A saved project is loaded. Upload a new file to create a new project.</p>}
                     
                     {ganttData && (
                       <div className="mt-4 p-3 bg-brand-primary/50 rounded-lg border border-brand-muted/30">
@@ -652,13 +704,13 @@ const App: React.FC = () => {
                         {!showFeedbackForm ? (
                             <div className="flex flex-col sm:flex-row gap-4">
                                  <button
-                                    onClick={handleSaveProject}
-                                    disabled={isLoading || !projectName.trim() || !!currentProjectId}
+                                    onClick={handleSaveOrUpdateProject}
+                                    disabled={isLoading || !projectName.trim() || !generatedSchedule}
                                     className="flex-1 flex items-center justify-center gap-2 text-lg font-bold py-3 px-6 rounded-lg transition-all duration-300 ease-in-out shadow-lg bg-green-600 hover:bg-green-500 text-white disabled:bg-brand-muted/40 disabled:text-brand-muted disabled:cursor-not-allowed"
-                                    aria-label={currentProjectId ? 'Project is already saved' : 'Save new project'}
+                                    aria-label={currentProjectId ? 'Update current project' : 'Save as new project'}
                                 >
                                     <SaveIcon className="w-6 h-6" />
-                                    <span>{currentProjectId ? 'Project Saved' : 'Save New Project'}</span>
+                                    <span>{currentProjectId ? 'Update Project' : 'Save New Project'}</span>
                                 </button>
                                 <button
                                     onClick={handleCreateNewProjectClick}
