@@ -1,5 +1,5 @@
 
-import { del, put } from '@vercel/blob';
+import { del, put, list } from '@vercel/blob';
 import type { SavedProject } from '../../types';
 
 export const runtime = 'edge';
@@ -19,8 +19,8 @@ export async function DELETE(request: Request): Promise<Response> {
     }
 
     try {
-        const blobUrl = `${process.env.BLOB_URL}/${pathname}`;
-        await del(blobUrl);
+        // The `del` function can take a pathname directly. The SDK will handle auth.
+        await del(pathname);
         return new Response(null, { status: 204 });
     } catch (error: any) {
         // Vercel Blob's del does not error on 404, so we just log other errors
@@ -39,12 +39,16 @@ export async function PUT(request: Request): Promise<Response> {
     
     try {
         const updatedProjectData = await request.json() as Partial<SavedProject>;
-        const blobUrl = `${process.env.BLOB_URL}/${pathname}`;
         
-        const response = await fetch(blobUrl);
-        if (response.status === 404) {
-             return new Response(JSON.stringify({ error: 'Project not found' }), { status: 404, headers: { 'Content-Type': 'application/json' }});
+        // Use list() to find the blob and its URL instead of constructing one.
+        const { blobs } = await list({ prefix: pathname, limit: 1 });
+        const existingBlob = blobs.find(b => b.pathname === pathname);
+
+        if (!existingBlob) {
+            return new Response(JSON.stringify({ error: 'Project not found' }), { status: 404, headers: { 'Content-Type': 'application/json' }});
         }
+        
+        const response = await fetch(existingBlob.url);
         if (!response.ok) {
             return new Response(JSON.stringify({ error: `Failed to fetch existing project data (status: ${response.status})` }), { status: 500, headers: { 'Content-Type': 'application/json' }});
         }
