@@ -76,12 +76,10 @@ const App: React.FC = () => {
     fetchProjects();
   }, []);
 
-  const resetAllState = useCallback(() => {
-    setError(null);
+  const clearGeneratedData = useCallback(() => {
     setAgentOutputs(null);
     setGeneratedSchedule(null);
     setGeneratedNarrative(null);
-    setProjectFeatures(null);
     setProgress([]);
     setGanttData(null);
     setTotalProjectDuration(null);
@@ -90,30 +88,29 @@ const App: React.FC = () => {
     setShowFeedbackForm(false);
     setFeedbackText('');
     setIsRegeneration(false);
+  }, []);
+
+  const resetAllState = useCallback(() => {
+    clearGeneratedData();
+    setError(null);
+    setProjectFeatures(null);
     setHistoricalData(null);
     setFileName(null);
     setProjectInput(initialProjectInput);
     setProjectName('');
     setStartDate(new Date().toISOString().split('T')[0]);
     setCurrentProjectId(null);
-  }, []);
+  }, [clearGeneratedData, initialProjectInput]);
 
   const handleResetForNewProject = useCallback(() => {
+    clearGeneratedData();
     setError(null);
-    setAgentOutputs(null);
-    setGeneratedSchedule(null);
-    setGeneratedNarrative(null);
-    setProgress([]);
-    setGanttData(null);
-    setTotalProjectDuration(null);
-    setView('schedule');
-    setScheduleFilter('all');
-    setShowFeedbackForm(false);
-    setFeedbackText('');
-    setIsRegeneration(false);
     
-    // Keep: historicalData, fileName, projectFeatures
-
+    // Keep historical data if user wants to use it for a new project
+    // setHistoricalData(null);
+    // setFileName(null);
+    // setProjectFeatures(null);
+    
     // Reset project-specific fields
     setProjectName('');
     setStartDate(new Date().toISOString().split('T')[0]);
@@ -130,10 +127,18 @@ const App: React.FC = () => {
     }
     setProjectInput({ ...initialProjectInput, selections: defaultSelections });
 
-}, [projectFeatures]);
+}, [projectFeatures, clearGeneratedData, initialProjectInput]);
 
   const handleFileLoad = useCallback((content: string, name: string) => {
-    resetAllState();
+    clearGeneratedData();
+    setError(null);
+
+    // If no project is currently loaded, also clear the project name field
+    // to signify we are starting a completely new project.
+    if (!currentProjectId) {
+        setProjectName('');
+    }
+
     try {
       const { features } = parseDataAndExtractFeatures(content, name);
       setHistoricalData(content);
@@ -155,7 +160,7 @@ const App: React.FC = () => {
             setError('An unknown error occurred during file parsing.');
         }
     }
-  }, [resetAllState]);
+  }, [clearGeneratedData, currentProjectId, initialProjectInput]);
   
   const calculateAndSetDuration = (scheduleData: GanttActivity[]) => {
       if (!scheduleData || scheduleData.length === 0) {
@@ -202,15 +207,7 @@ const App: React.FC = () => {
     }
     
     setError(null);
-    setAgentOutputs(null);
-    setGeneratedSchedule(null);
-    setGeneratedNarrative(null);
-    setGanttData(null);
-    setTotalProjectDuration(null);
-    setView('schedule');
-    setScheduleFilter('all');
-    setShowFeedbackForm(false);
-    setIsRegeneration(false);
+    clearGeneratedData();
     
     setIsLoading(true);
     setProgress(getInitialSteps(API_PROVIDER));
@@ -253,12 +250,7 @@ const App: React.FC = () => {
     }
     
     setError(null);
-    setGeneratedSchedule(null);
-    setGeneratedNarrative(null);
-    setGanttData(null);
-    setTotalProjectDuration(null);
-    setView('schedule'); // Reset view
-    setScheduleFilter('all');
+    clearGeneratedData();
     setShowFeedbackForm(false); // Hide the form after submission
     
     setIsLoading(true);
@@ -399,71 +391,61 @@ const App: React.FC = () => {
 
   const handleLoadProject = (projectId: string) => {
     const projectToLoad = savedProjects.find(p => p.id === projectId);
-    if (projectToLoad && !isLoading) {
-        resetAllState();
-        try {
-            // Robustly find the scheduler data
-            let schedulerData: AiSchedulerData | undefined | null = null;
+    if (!projectToLoad || isLoading) return;
 
-            // Case 1: Modern format with nested aiSchedulerData object
-            if (projectToLoad.aiSchedulerData && typeof projectToLoad.aiSchedulerData === 'object') {
-                schedulerData = projectToLoad.aiSchedulerData;
-            } 
-            // Case 2: Legacy format with scheduler data at the top level of the project object
-            else if (projectToLoad.historicalData && projectToLoad.generatedSchedule) {
-                // Type assertion to treat the legacy project object as AiSchedulerData
-                schedulerData = projectToLoad as unknown as AiSchedulerData;
-            }
+    // Check for scheduler data BEFORE resetting.
+    let schedulerData: AiSchedulerData | undefined | null = null;
+    if (projectToLoad.aiSchedulerData && typeof projectToLoad.aiSchedulerData === 'object') {
+        schedulerData = projectToLoad.aiSchedulerData;
+    } else if (projectToLoad.historicalData && projectToLoad.generatedSchedule) {
+        schedulerData = projectToLoad as unknown as AiSchedulerData;
+    }
 
-            // Case 3: No valid scheduler data found
-            if (!schedulerData) {
-              setError(`Project "${projectToLoad.name}" does not contain AI Scheduler data. This file might be from another application or an older version. You can start a new schedule generation for this project.`);
-              setProjectName(projectToLoad.name);
-              setCurrentProjectId(projectToLoad.id);
-              // Clear out any potential scheduler-related state
-              setHistoricalData(null);
-              setFileName(null);
-              setProjectFeatures(null);
-              setProjectInput(initialProjectInput);
-              setAgentOutputs(null);
-              setGeneratedSchedule(null);
-              setGeneratedNarrative(null);
-              setGanttData(null);
-              return; 
-            }
-            
-            // If we found scheduler data, proceed to load it into the app state
-            const { features } = parseDataAndExtractFeatures(schedulerData.historicalData, schedulerData.fileName);
-            
-            setHistoricalData(schedulerData.historicalData);
-            setFileName(schedulerData.fileName);
-            setProjectFeatures(features);
-            setProjectName(projectToLoad.name);
-            // Ensure projectInput is valid, providing a default if missing from legacy data
-            setProjectInput(schedulerData.projectInput || initialProjectInput);
-            setStartDate(schedulerData.startDate || new Date().toISOString().split('T')[0]);
-            setAgentOutputs(schedulerData.agentOutputs || null);
-            setGeneratedSchedule(schedulerData.generatedSchedule || null);
-            setGeneratedNarrative(schedulerData.generatedNarrative || null);
-            
-            if (schedulerData.generatedSchedule && schedulerData.generatedSchedule.length > 0) {
-                const calculatedGanttData = calculateScheduleWithMetrics(schedulerData.generatedSchedule, schedulerData.startDate);
-                setGanttData(calculatedGanttData);
-                calculateAndSetDuration(calculatedGanttData);
-                setView('gantt');
-            }
-
-            setCurrentProjectId(projectToLoad.id);
-        } catch(e) {
-            if (e instanceof Error) {
-                setError(`Error loading project: ${e.message}`);
-            } else {
-                setError('An unknown error occurred while loading the project.');
-            }
-            // Also reset core project identifiers if loading fails catastrophically
-            setProjectName(projectToLoad.name);
-            setCurrentProjectId(projectToLoad.id);
+    // CASE 1: External project without scheduler data.
+    // Set the context, show a message, but DO NOT reset state. This preserves any
+    // historical data the user might have just uploaded.
+    if (!schedulerData) {
+        clearGeneratedData();
+        setProjectName(projectToLoad.name);
+        setCurrentProjectId(projectToLoad.id);
+        setError(`Project "${projectToLoad.name}" does not contain AI Scheduler data. This file might be from another application or an older version. Please upload historical data to generate a new schedule for this project.`);
+        setProjectInput(initialProjectInput); // Reset form for new input
+        return; 
+    }
+    
+    // CASE 2: Project has scheduler data.
+    // Perform a full reset and then load the project's state.
+    resetAllState();
+    
+    try {
+        const { features } = parseDataAndExtractFeatures(schedulerData.historicalData, schedulerData.fileName);
+        
+        setHistoricalData(schedulerData.historicalData);
+        setFileName(schedulerData.fileName);
+        setProjectFeatures(features);
+        setProjectName(projectToLoad.name);
+        setProjectInput(schedulerData.projectInput || initialProjectInput);
+        setStartDate(schedulerData.startDate || new Date().toISOString().split('T')[0]);
+        setAgentOutputs(schedulerData.agentOutputs || null);
+        setGeneratedSchedule(schedulerData.generatedSchedule || null);
+        setGeneratedNarrative(schedulerData.generatedNarrative || null);
+        
+        if (schedulerData.generatedSchedule && schedulerData.generatedSchedule.length > 0) {
+            const calculatedGanttData = calculateScheduleWithMetrics(schedulerData.generatedSchedule, schedulerData.startDate);
+            setGanttData(calculatedGanttData);
+            calculateAndSetDuration(calculatedGanttData);
+            setView('gantt');
         }
+
+        setCurrentProjectId(projectToLoad.id);
+    } catch(e) {
+        if (e instanceof Error) {
+            setError(`Error loading project: ${e.message}`);
+        } else {
+            setError('An unknown error occurred while loading the project.');
+        }
+        setProjectName(projectToLoad.name);
+        setCurrentProjectId(projectToLoad.id);
     }
   };
 
@@ -622,7 +604,7 @@ const App: React.FC = () => {
                         aria-label="New project name"
                     />
                     
-                    {ganttData && (
+                    {currentProjectId && (
                       <div className="mt-4 p-3 bg-brand-primary/50 rounded-lg border border-brand-muted/30">
                           <button 
                               onClick={handleResetForNewProject} 
