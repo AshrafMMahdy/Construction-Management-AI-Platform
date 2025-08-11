@@ -37,32 +37,60 @@ export async function GET(request: Request) {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
         };
 
-        // Check for scheduler project format and normalize it
-        if (projectData.projectInput && projectData.generatedSchedule) {
-            const normalizedProject: Project = {
-                id: projectData.id,
-                name: projectData.name,
-                appOrigin: 'scheduler',
-                createdAt: projectData.createdAt,
-                updatedAt: projectData.createdAt, // No 'updatedAt' in source
-                scheduleData: projectData.historicalData || '',
-                scheduleFileName: projectData.fileName || '',
-                analysisMethod: 'as-built-vs-planned',
-                additionalDocs: [],
-                report: null,
-            };
-            return new Response(JSON.stringify(normalizedProject), { status: 200, headers });
-        }
+        // This will be the final, normalized project object sent to the client.
+        const resultProject: Project = {
+            id: projectData.id,
+            name: projectData.name,
+            createdAt: projectData.createdAt,
+            updatedAt: projectData.updatedAt || projectData.createdAt,
+            appOrigin: projectData.appOrigin, // Start with original, will overwrite if needed
+            // Default values
+            scheduleData: '',
+            scheduleFileName: '',
+            analysisMethod: 'as-built-vs-planned',
+            additionalDocs: [],
+            report: null,
+        };
 
-        // Check for contract analysis project format and normalize it
-        if (projectData.contractFile && projectData.analysisResults) {
-            let additionalDocs: AdditionalDocData[] = [];
+        // DATA LOADING PRECEDENCE:
+        // 1. New nested format (highest priority)
+        // 2. Old flat format (for backward compatibility)
+        // 3. Other app formats (for initial import)
+
+        if (projectData.delayAnalysisData) {
+            // PRIORITY 1: Found data in the new nested format. This is the most authoritative source.
+            const dataSource = projectData.delayAnalysisData;
+            resultProject.appOrigin = 'delay-analysis';
+            resultProject.scheduleData = dataSource.scheduleData || '';
+            resultProject.scheduleFileName = dataSource.scheduleFileName || '';
+            resultProject.analysisMethod = dataSource.analysisMethod || 'as-built-vs-planned';
+            resultProject.additionalDocs = dataSource.additionalDocs || [];
+            resultProject.report = dataSource.report || null;
+        } 
+        else if (projectData.scheduleData) {
+            // PRIORITY 2: Found legacy flat-file data from this app.
+            resultProject.appOrigin = 'delay-analysis';
+            resultProject.scheduleData = projectData.scheduleData || '';
+            resultProject.scheduleFileName = projectData.scheduleFileName || '';
+            resultProject.analysisMethod = projectData.analysisMethod || 'as-built-vs-planned';
+            resultProject.additionalDocs = projectData.additionalDocs || [];
+            resultProject.report = projectData.report || null;
+        }
+        else if (projectData.projectInput && projectData.generatedSchedule) {
+            // PRIORITY 3: Import from a scheduler app project.
+            resultProject.appOrigin = 'scheduler';
+            resultProject.scheduleData = projectData.historicalData || '';
+            resultProject.scheduleFileName = projectData.fileName || '';
+        }
+        else if (projectData.contractFile && projectData.analysisResults) {
+            // PRIORITY 4: Import from a contract analysis app project.
+            resultProject.appOrigin = 'contract-analysis';
             try {
                 if (projectData.historicalData && typeof projectData.historicalData === 'string') {
                     const clauses = JSON.parse(projectData.historicalData);
                     if (Array.isArray(clauses)) {
                         const content = clauses.map((c: any) => c.clauseText || '').join('\n\n---\n\n');
-                        additionalDocs.push({
+                        resultProject.additionalDocs.push({
                             name: projectData.fileName || 'Contract Clauses.txt',
                             category: 'Contract',
                             content: content
@@ -72,37 +100,9 @@ export async function GET(request: Request) {
             } catch (e) {
                 console.error("Could not parse historicalData from contract project:", e);
             }
-            
-            const normalizedProject: Project = {
-                id: projectData.id,
-                name: projectData.name,
-                appOrigin: 'contract-analysis',
-                createdAt: projectData.createdAt,
-                updatedAt: projectData.createdAt,
-                scheduleData: '',
-                scheduleFileName: '',
-                analysisMethod: 'as-built-vs-planned',
-                additionalDocs,
-                report: null,
-            };
-            return new Response(JSON.stringify(normalizedProject), { status: 200, headers });
         }
 
-        // Default: Handle native delay-analysis projects, supporting both new (nested) and old (flat) formats.
-        const dataSource = projectData.delayAnalysisData || projectData;
-        const nativeProject: Project = {
-            id: projectData.id,
-            name: projectData.name,
-            createdAt: projectData.createdAt,
-            updatedAt: projectData.updatedAt || projectData.createdAt,
-            appOrigin: projectData.appOrigin || 'delay-analysis',
-            scheduleData: dataSource.scheduleData || '',
-            scheduleFileName: dataSource.scheduleFileName || '',
-            analysisMethod: dataSource.analysisMethod || 'as-built-vs-planned',
-            additionalDocs: dataSource.additionalDocs || [],
-            report: dataSource.report || null
-        };
-        return new Response(JSON.stringify(nativeProject), { status: 200, headers });
+        return new Response(JSON.stringify(resultProject), { status: 200, headers });
 
     } catch (error: any) {
         if (error.status === 404 || error.message.includes('404')) {
@@ -146,6 +146,7 @@ export async function PUT(request: Request) {
             ...originalProject,
             name: name || originalProject.name, // Update name if provided from body
             updatedAt: new Date().toISOString(),
+            appOrigin: 'delay-analysis', // Mark this app as the last one to edit it.
             delayAnalysisData: { // Nest our app's data
                 ...(originalProject.delayAnalysisData || {}),
                 ...delayAnalysisPayload,
@@ -170,7 +171,7 @@ export async function PUT(request: Request) {
         const responseProject: Project = {
             id: updatedProjectFile.id,
             name: updatedProjectFile.name,
-            appOrigin: originalProject.appOrigin || 'delay-analysis',
+            appOrigin: updatedProjectFile.appOrigin,
             createdAt: originalProject.createdAt,
             updatedAt: updatedProjectFile.updatedAt,
             scheduleData: delayAnalysisPayload.scheduleData ?? '',
