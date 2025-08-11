@@ -88,14 +88,19 @@ export async function GET(request: Request) {
             return new Response(JSON.stringify(normalizedProject), { status: 200, headers });
         }
 
-        // Default: Assume it's a native delay-analysis project and ensure fields
+        // Default: Handle native delay-analysis projects, supporting both new (nested) and old (flat) formats.
+        const dataSource = projectData.delayAnalysisData || projectData;
         const nativeProject: Project = {
-            ...projectData,
-            analysisMethod: projectData.analysisMethod || 'as-built-vs-planned',
-            additionalDocs: projectData.additionalDocs || [],
-            report: projectData.report || null,
-            scheduleData: projectData.scheduleData || '',
-            scheduleFileName: projectData.scheduleFileName || ''
+            id: projectData.id,
+            name: projectData.name,
+            createdAt: projectData.createdAt,
+            updatedAt: projectData.updatedAt || projectData.createdAt,
+            appOrigin: projectData.appOrigin || 'delay-analysis',
+            scheduleData: dataSource.scheduleData || '',
+            scheduleFileName: dataSource.scheduleFileName || '',
+            analysisMethod: dataSource.analysisMethod || 'as-built-vs-planned',
+            additionalDocs: dataSource.additionalDocs || [],
+            report: dataSource.report || null
         };
         return new Response(JSON.stringify(nativeProject), { status: 200, headers });
 
@@ -125,36 +130,57 @@ export async function PUT(request: Request) {
         const fetchRes = await fetch(headBlob.url, { cache: 'no-store' });
         if (!fetchRes.ok) throw new Error('Original project not found for update.');
         const originalProject: any = await fetchRes.json();
+        
+        const { name, scheduleData, scheduleFileName, analysisMethod, additionalDocs, report } = body;
 
-        const mergedData: Project = { 
-            id: originalProject.id,
-            name: originalProject.name,
-            createdAt: originalProject.createdAt,
-            appOrigin: 'delay-analysis',
-            updatedAt: new Date().toISOString(),
-            // Provide defaults for all fields to create a valid Project object
-            scheduleData: originalProject.scheduleData || '',
-            scheduleFileName: originalProject.scheduleFileName || '',
-            analysisMethod: originalProject.analysisMethod || 'as-built-vs-planned',
-            additionalDocs: originalProject.additionalDocs || [],
-            report: originalProject.report || null,
+        // Prepare the data payload specific to this application
+        const delayAnalysisPayload = {
+            scheduleData,
+            scheduleFileName,
+            analysisMethod,
+            additionalDocs,
+            report,
         };
 
-        Object.assign(mergedData, body);
+        const updatedProjectFile = {
+            ...originalProject,
+            name: name || originalProject.name, // Update name if provided from body
+            updatedAt: new Date().toISOString(),
+            delayAnalysisData: { // Nest our app's data
+                ...(originalProject.delayAnalysisData || {}),
+                ...delayAnalysisPayload,
+            },
+        };
+        
+        // Clean up legacy top-level fields to migrate to the new nested structure
+        delete updatedProjectFile.scheduleData;
+        delete updatedProjectFile.scheduleFileName;
+        delete updatedProjectFile.analysisMethod;
+        delete updatedProjectFile.additionalDocs;
+        delete updatedProjectFile.report;
 
-        // Ensure critical metadata is correct after merging
-        mergedData.appOrigin = 'delay-analysis';
-        mergedData.id = id;
-        mergedData.updatedAt = new Date().toISOString();
-
-
-        await put(`projects/${id}.json`, JSON.stringify(mergedData), {
+        await put(`projects/${id}.json`, JSON.stringify(updatedProjectFile), {
             access: 'public',
             contentType: 'application/json',
             addRandomSuffix: false,
+            allowOverwrite: true, // Explicitly allow overwrite
         });
 
-        return new Response(JSON.stringify(mergedData), {
+        // The client expects a flat Project structure, so we normalize the response
+        const responseProject: Project = {
+            id: updatedProjectFile.id,
+            name: updatedProjectFile.name,
+            appOrigin: originalProject.appOrigin || 'delay-analysis',
+            createdAt: originalProject.createdAt,
+            updatedAt: updatedProjectFile.updatedAt,
+            scheduleData: delayAnalysisPayload.scheduleData ?? '',
+            scheduleFileName: delayAnalysisPayload.scheduleFileName ?? '',
+            analysisMethod: delayAnalysisPayload.analysisMethod ?? 'as-built-vs-planned',
+            additionalDocs: delayAnalysisPayload.additionalDocs ?? [],
+            report: delayAnalysisPayload.report ?? null,
+        };
+
+        return new Response(JSON.stringify(responseProject), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
         });
