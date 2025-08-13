@@ -11,36 +11,31 @@ const getCalendarDaysDifference = (d1: Date, d2: Date) => {
 interface GanttChartProps {
     activities: GanttActivity[];
     filter: 'all' | 'critical';
+    showLinks: boolean;
 }
 
-const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
+const GanttChart: React.FC<GanttChartProps> = ({ activities, filter, showLinks }) => {
     const ganttContainerRef = useRef<HTMLDivElement>(null);
     const taskBarRefs = useRef<Record<number, HTMLDivElement | null>>({});
     const [connectorLines, setConnectorLines] = useState<React.ReactNode[]>([]);
+    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
     
     const activityIdMap = useMemo(() => new Map(activities.map(a => [a.id, a])), [activities]);
 
     const activityColumnWidth = useMemo(() => {
-        if (!activities || activities.length === 0) {
-            return 250; // default width
-        }
-        
+        if (!activities || activities.length === 0) return 250;
         if (typeof document === 'undefined') return 250;
 
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
-        if (!context) {
-            return 250; 
-        }
+        if (!context) return 250; 
         
         context.font = '0.875rem sans-serif'; 
 
         let maxWidth = 0;
         for (const activity of activities) {
             const width = context.measureText(activity.name).width;
-            if (width > maxWidth) {
-                maxWidth = width;
-            }
+            if (width > maxWidth) maxWidth = width;
         }
         
         return Math.max(150, Math.ceil(maxWidth) + 40); 
@@ -51,18 +46,22 @@ const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
             const today = new Date();
             return { projectStartDate: today, projectEndDate: today, totalDays: 1 };
         }
-        const startDates = activities.map(a => a.startDate);
-        const endDates = activities.map(a => a.endDate);
+        const startDates = activities.map(a => a.startDate).filter(d => d.getTime() > 0);
+        const endDates = activities.map(a => a.endDate).filter(d => d.getTime() > 0);
+
+        if (startDates.length === 0) {
+             const today = new Date();
+            return { projectStartDate: today, projectEndDate: today, totalDays: 1 };
+        }
 
         const minDate = new Date(Math.min(...startDates.map(d => d.getTime())));
         const maxDate = new Date(Math.max(...endDates.map(d => d.getTime())));
         
         minDate.setDate(minDate.getDate() - 2);
-        
         const endOfMonth = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
 
-        const totalDays = getCalendarDaysDifference(minDate, endOfMonth) || 1;
-        return { projectStartDate: minDate, projectEndDate: endOfMonth, totalDays };
+        const totalDaysValue = getCalendarDaysDifference(minDate, endOfMonth) || 1;
+        return { projectStartDate: minDate, projectEndDate: endOfMonth, totalDays: totalDaysValue };
     }, [activities]);
 
     const timelineHeader = useMemo(() => {
@@ -92,9 +91,33 @@ const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
         }
         return months;
     }, [projectStartDate, projectEndDate, totalDays]);
+    
+    useLayoutEffect(() => {
+        const container = ganttContainerRef.current;
+        if (container) {
+            const resizeObserver = new ResizeObserver(entries => {
+                if (entries[0]) {
+                    const { width, height } = entries[0].contentRect;
+                    setDimensions({ width, height });
+                }
+            });
+            resizeObserver.observe(container);
+            return () => resizeObserver.disconnect();
+        }
+    }, []);
 
     useLayoutEffect(() => {
-        if (!ganttContainerRef.current || activities.length === 0) return;
+        // If we can't draw anything, clear lines and exit.
+        if (!ganttContainerRef.current || activities.length === 0 || dimensions.width === 0) {
+            setConnectorLines([]);
+            return;
+        };
+        
+        // If links are toggled off, clear lines and exit.
+        if (!showLinks) {
+            setConnectorLines([]);
+            return;
+        }
 
         const containerRect = ganttContainerRef.current.getBoundingClientRect();
         const newLines: React.ReactNode[] = [];
@@ -107,9 +130,8 @@ const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
             predecessors.forEach((pred) => {
                 const predecessorBar = taskBarRefs.current[pred.id];
                 const predecessorActivity = activityIdMap.get(pred.id);
-                const successorActivity = activityIdMap.get(activity.id);
-
-                if (!predecessorBar || !predecessorActivity || !successorActivity) return;
+                
+                if (!predecessorBar || !predecessorActivity) return;
 
                 const successorRect = successorBar.getBoundingClientRect();
                 const predecessorRect = predecessorBar.getBoundingClientRect();
@@ -126,7 +148,7 @@ const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
                     ? `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`
                     : `M ${startX} ${startY} L ${startX+10} ${startY} L ${startX+10} ${endY-10} L ${endX-10} ${endY-10} L ${endX-10} ${endY} L ${endX} ${endY}`;
 
-                const isLineFilteredOut = filter === 'critical' && (!predecessorActivity.isCritical || !successorActivity.isCritical);
+                const isLineFilteredOut = filter === 'critical' && (!predecessorActivity.isCritical || !activity.isCritical);
 
                 newLines.push(
                     <g key={`${pred.id}-${activity.id}`} className={`transition-opacity duration-300 ${isLineFilteredOut ? 'opacity-10' : 'opacity-100'}`}>
@@ -138,22 +160,22 @@ const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
         });
         setConnectorLines(newLines);
 
-    }, [activities, totalDays, activityColumnWidth, filter, activityIdMap]);
+    }, [activities, totalDays, activityColumnWidth, filter, activityIdMap, showLinks, dimensions]);
     
     const ganttHeight = activities.length * 40;
     const headerHeight = 40; 
 
     return (
         <div className="bg-brand-secondary rounded-lg shadow-lg text-brand-light w-full overflow-x-auto">
-            <div className="relative" style={{ width: '100%', minWidth: `${activityColumnWidth + 600}px`, height: `${ganttHeight + headerHeight}px`}}>
+            <div className="relative" style={{ width: '100%', minWidth: `${activityColumnWidth + 600}px`}}>
                 {/* Headers */}
                 <div className="sticky top-0 z-10 flex bg-brand-secondary" style={{ height: `${headerHeight}px`}}>
                     <div className="flex-shrink-0 font-bold text-brand-accent p-1 border-r border-b border-brand-muted/50 flex items-center justify-center" style={{ width: `${activityColumnWidth}px` }}>Activity</div>
                     <div className="flex-grow border-b border-brand-muted/50 flex">{timelineHeader}</div>
                 </div>
 
-                {/* Grid */}
-                <div className="relative w-full" style={{height: `${ganttHeight}px`}}>
+                {/* Grid and Data */}
+                <div ref={ganttContainerRef} className="relative w-full" style={{height: `${ganttHeight}px`}}>
                     {/* Background Grid Lines */}
                     <div className="absolute top-0 right-0 bottom-0" style={{ left: `${activityColumnWidth}px` }}>
                          {[...Array(Math.floor(totalDays))].map((_, i) => (
@@ -177,7 +199,7 @@ const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
                                         ref={el => { if(el) { taskBarRefs.current[activity.id] = el } }}
                                         className={`absolute h-6 top-[7px] rounded flex items-center px-2 text-xs font-semibold truncate transition-colors duration-300 ${activity.isCritical ? 'bg-red-500/80 hover:bg-red-500 text-white' : 'bg-brand-accent/70 hover:bg-brand-accent text-brand-primary'}`}
                                         style={{ left: `${left}%`, width: `max(0.5%, ${width}%)` }}
-                                        title={`${activity.name}\nStart: ${formatDate(activity.startDate)}\nEnd: ${formatDate(activity.endDate)}\nDuration: ${activity.duration} days\nTotal Float: ${activity.totalFloat} days`}
+                                        title={`${activity.name}\nStart: ${formatDate(activity.startDate)}\nEnd: ${formatDate(activity.endDate)}\nDuration: ${activity.duration} days\nTotal Float: ${activity.totalFloat} days\nResource: ${activity.resourceGroupName || 'N/A'}\nCost: ${activity.packageCost || 'N/A'}`}
                                     >
                                     </div>
                                 </div>
@@ -185,11 +207,9 @@ const GanttChart: React.FC<GanttChartProps> = ({ activities, filter }) => {
                         )
                     })}
                      {/* SVG overlay for connectors */}
-                    <div ref={ganttContainerRef} className="absolute top-0 left-0 w-full h-full">
-                        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
-                            {connectorLines}
-                        </svg>
-                    </div>
+                    <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
+                        {connectorLines}
+                    </svg>
                 </div>
             </div>
         </div>
