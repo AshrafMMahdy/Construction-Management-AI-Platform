@@ -1,3 +1,4 @@
+
 import { ProjectFeatures } from '../types';
 
 const FEATURE_COLUMNS = [
@@ -14,22 +15,58 @@ const normalizeKey = (key: string): string =>
     key.trim().toLowerCase().replace(/\s+/g, '_').replace(/[()]/g, '');
 
 const parseCsv = (csvText: string): Record<string, any>[] => {
-  const lines = csvText.trim().split('\n');
+  const rows: Record<string, any>[] = [];
+  const lines = csvText.trim().split(/\r?\n/);
   if (lines.length < 2) return [];
 
-  const header = lines[0].split(',').map(h => h.trim());
-  const rows = lines.slice(1).map(line => {
-    const values = line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g) || [];
-    const rowObj: Record<string, any> = {};
-    header.forEach((key, index) => {
-      let value = values[index]?.trim() || null;
-      if (value && value.startsWith('"') && value.endsWith('"')) {
-          value = value.substring(1, value.length - 1).replace(/""/g, '""');
+  // This regex handles commas inside quotes and escaped quotes ("").
+  const csvRegex = /(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^",]*))/g;
+  
+  const parseLine = (line: string): string[] => {
+      const values: string[] = [];
+      let match;
+      // We need to reset the regex state for each line
+      csvRegex.lastIndex = 0;
+      while (match = csvRegex.exec(line)) {
+          // If the first capture group is matched, it's a quoted value.
+          // We need to un-escape the double quotes.
+          if (match[1] !== undefined) {
+              values.push(match[1].replace(/""/g, '"'));
+          } else {
+              // Otherwise, it's an unquoted value.
+              values.push(match[2] !== undefined ? match[2] : '');
+          }
       }
-      rowObj[key] = value;
-    });
-    return rowObj;
-  });
+      return values;
+  }
+  
+  const header = parseLine(lines[0]).map(h => h.trim());
+  let currentLineBuffer = '';
+  
+  for (let i = 1; i < lines.length; i++) {
+      currentLineBuffer += (currentLineBuffer ? '\n' : '') + lines[i];
+      const quoteCount = (currentLineBuffer.match(/"/g) || []).length;
+
+      // If quote count is odd, it's a multiline field. Continue to append next line.
+      if (quoteCount % 2 === 1 && i < lines.length - 1) {
+          continue;
+      }
+      
+      const values = parseLine(currentLineBuffer);
+      currentLineBuffer = ''; // Reset buffer after processing
+
+      if (values.length === header.length) {
+          const rowObj: Record<string, any> = {};
+          header.forEach((key, index) => {
+              rowObj[key] = values[index] ? values[index].trim() : null;
+          });
+          rows.push(rowObj);
+      } else if (values.length > 0 && values.some(v => v.trim() !== '')) {
+           // Only warn if the row is not effectively empty
+           console.warn(`CSV parsing warning: Row ${i + 1} has ${values.length} columns, but header has ${header.length}. Skipping row.`);
+      }
+  }
+
   return rows;
 };
 
