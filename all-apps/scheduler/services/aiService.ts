@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ScheduleResponse, Activity, ProjectInput, EvaluationScores, AgentOutput, ProgressStep, ProgressUpdate, AgentActivitySuggestion, DependencyType } from '../types';
+import { ScheduleResponse, Activity, ProjectInput, EvaluationScores, AgentOutput, ProgressStep, ProgressUpdate, AgentActivitySuggestion, DependencyType, SupportingDocument } from '../types';
 import { API_PROVIDER, LM_STUDIO_BASE_URL, MODELS } from '../config';
 import { parseDataAndExtractFeatures } from "../utils/dataParser";
 import { calculateScheduleWithMetrics, countWorkdays } from '../utils/scheduleCalculator';
@@ -13,7 +13,7 @@ const FINAL_SCHEDULE_SCHEMA = {
     properties: {
         schedule: {
             type: Type.ARRAY,
-            description: "The detailed project schedule, with predecessor strings calculated.",
+            description: "The detailed project schedule, with predecessor strings and resource allocations calculated.",
             items: {
                 type: Type.OBJECT,
                 properties: {
@@ -21,8 +21,13 @@ const FINAL_SCHEDULE_SCHEMA = {
                     name: { type: Type.STRING, description: "Name of the activity." },
                     duration: { type: Type.INTEGER, description: "Duration in working days." },
                     predecessors: { type: Type.STRING, description: "Predecessor string (e.g., '4FS,5SS+3'). An empty string for no predecessors." },
+                    resourceGroupName: { type: Type.STRING, description: "The name of the resource group assigned, e.g., 'Project Management' or 'N/A' if not applicable." },
+                    membersPerCrew: { type: Type.INTEGER, description: "Number of members in a single crew. Use 0 if not applicable." },
+                    numberOfCrews: { type: Type.INTEGER, description: "Number of crews assigned. Use 0 if not applicable." },
+                    boqQuantity: { type: Type.STRING, description: "Bill of Quantities item, e.g., '1 Lump Sum' or 'N/A'." },
+                    packageCost: { type: Type.STRING, description: "Estimated cost for this activity package, e.g., '€ 830,283.00' or '€ 0.00'." },
                 },
-                required: ["id", "name", "duration", "predecessors"]
+                required: ["id", "name", "duration", "predecessors", "resourceGroupName", "membersPerCrew", "numberOfCrews", "boqQuantity", "packageCost"]
             },
         },
         narrative: {
@@ -53,7 +58,7 @@ const LOCAL_AGENT_SCHEMA = {
     properties: {
         schedule: {
             type: Type.ARRAY,
-            description: "The list of proposed project activities.",
+            description: "The list of proposed project activities with resource allocations.",
             items: {
                 type: Type.OBJECT,
                 properties: {
@@ -64,9 +69,14 @@ const LOCAL_AGENT_SCHEMA = {
                         type: Type.ARRAY,
                         description: "An analysis of which activities should logically follow this one. An activity that is a natural end point should suggest the 'Project End' activity as its successor.",
                         items: SUCCESSOR_SUGGESTION_SCHEMA
-                    }
+                    },
+                    resourceGroupName: { type: Type.STRING, description: "The name of the resource group assigned, e.g., 'Project Management' or 'N/A' if not applicable." },
+                    membersPerCrew: { type: Type.INTEGER, description: "Number of members in a single crew. Use 0 if not applicable." },
+                    numberOfCrews: { type: Type.INTEGER, description: "Number of crews assigned. Use 0 if not applicable." },
+                    boqQuantity: { type: Type.STRING, description: "Bill of Quantities item, e.g., '1 Lump Sum' or 'N/A'." },
+                    packageCost: { type: Type.STRING, description: "Estimated cost for this activity package, e.g., '€ 830,283.00' or '€ 0.00'." },
                 },
-                required: ["id", "name", "duration", "successorSuggestions"]
+                required: ["id", "name", "duration", "successorSuggestions", "resourceGroupName", "membersPerCrew", "numberOfCrews", "boqQuantity", "packageCost"]
             },
         },
         narrative: {
@@ -165,6 +175,7 @@ const runLocalAgent = async (
     agentId: string,
     systemInstruction: string,
     contextData: string,
+    supportingDocsContent: string,
     projectInput: ProjectInput,
     model: string,
 ): Promise<{schedule: AgentActivitySuggestion[], narrative: string}> => {
@@ -174,15 +185,22 @@ const runLocalAgent = async (
     const userPrompt = `
 You MUST follow these critical rules:
 1. Your entire output MUST be a single JSON object matching the required schema.
-2. Your primary task is to propose a list of activities.
-3. For EACH activity, you MUST analyze and determine its most logical successor(s) and the correct dependency type (FS, SS, FF, SF). This is the most important part of your job.
-4. You MUST include "Project Start" (ID 1, duration 0) and "Project End" activities.
-5. All activities must eventually lead to "Project End". Do this by correctly setting successor suggestions. For example, the last real activities should suggest "Project End" as their successor.
-6. DO NOT calculate predecessors. Your job is to suggest successors.
+2. Your primary task is to propose a list of activities WITH a full resource allocation.
+3. For EACH activity, you MUST analyze and determine its most logical successor(s) and the correct dependency type (FS, SS, FF, SF).
+4. For EACH activity, you MUST ALSO determine the 'resourceGroupName', 'membersPerCrew', 'numberOfCrews', 'boqQuantity', and 'packageCost' by analyzing ALL provided data.
+5. You MUST include "Project Start" (ID 1, duration 0) and "Project End" activities. Their resource/cost fields can be "N/A" or 0.
+6. All activities must eventually lead to "Project End". Do this by correctly setting successor suggestions.
+7. DO NOT calculate predecessors. Your job is to suggest successors.
 
 ${contextHeader}:
 \`\`\`json
 ${contextData}
+\`\`\`
+
+Supporting Documents for Resource & Cost Allocation:
+This data provides critical context on resource productivity and costs.
+\`\`\`
+${supportingDocsContent || "No supporting documents provided."}
 \`\`\`
 
 New Project Details:
@@ -190,7 +208,7 @@ New Project Details:
 ${projectDesc}
 \`\`\`
 
-Now, generate your list of activities and their successor suggestions.
+Now, generate your list of activities with their successor suggestions and full resource/cost allocations.
     `;
     
     if (API_PROVIDER === 'GEMINI') {
@@ -202,6 +220,7 @@ Now, generate your list of activities and their successor suggestions.
 
 const runLeaderAgent = async (
     contextData: string,
+    supportingDocsContent: string,
     projectInput: ProjectInput,
     agentOutputs: AgentOutput[],
     onProgressUpdate: (updates: ProgressUpdate[]) => void,
@@ -213,20 +232,21 @@ const runLeaderAgent = async (
 Agent: ${out.agentId}
 Evaluation Scores: ${JSON.stringify(out.scores)}
 Narrative: "${out.narrative}"
-Schedule proposal (with successor suggestions):
+Schedule proposal (with successors and resources):
 ${JSON.stringify(out.schedule, null, 2)}
 ---
     `).join('\n');
 
-    const systemInstruction = `You are the expert LEADER of an AI agent team. You are a master project scheduler. Your task is to analyze your team's proposals and create ONE final, superior, and logically sound schedule.
+    const systemInstruction = `You are the expert LEADER of an AI agent team. You are a master project scheduler. Your task is to analyze your team's proposals and create ONE final, superior, and logically sound schedule WITH full resource allocation.
 
 **YOUR CRITICAL TASKS:**
-1.  **ANALYZE & SELECT:** Review all activities and successor suggestions from your agents. Discard redundant or illogical activities. Select the best and most comprehensive set of tasks to form a complete project.
+1.  **ANALYZE & SYNTHESIZE:** Review all activities, successor suggestions, AND resource allocations from your agents. Discard redundant activities, resolve conflicts in resource proposals, and select the best and most comprehensive set of tasks and resources to form a complete project plan.
 2.  **CONSTRUCT THE GRAPH:** This is your most important task. Based on the successor suggestions, you must build the final schedule. For each activity you select, you will calculate its \`predecessors\` string (e.g., '5FS', '6SS+2'). You do this by looking at which other activities have listed it as a successor.
-3.  **ENSURE LOGICAL SOUNDNESS:** The final schedule MUST be a fully connected graph. It must begin with "Project Start" (ID 1, duration 0) and end with "Project End" (duration 0). There must be a continuous path of dependencies from Start to End. NO orphan or dangling tasks.
-4.  **PRODUCE FINAL OUTPUT:** Your output must be a single JSON object matching the final schedule schema, including the calculated \`predecessors\` for each activity.
-5.  **NARRATIVE:** Write a concise narrative (around 150 words) explaining your final decisions, referencing why you chose certain elements from your agents' proposals and the rationale for the final schedule's structure.
-6.  **SELF-CORRECTION & FEEDBACK:** If you are given feedback (either from a user or an automated check), you MUST correct all listed issues in your new attempt.`;
+3.  **FINALIZE RESOURCES:** Based on the agent proposals and supporting documents, determine the final, most appropriate resource and cost allocation for each activity.
+4.  **ENSURE LOGICAL SOUNDNESS:** The final schedule MUST be a fully connected graph. It must begin with "Project Start" (ID 1, duration 0) and end with "Project End" (duration 0). There must be a continuous path of dependencies from Start to End. NO orphan or dangling tasks.
+5.  **PRODUCE FINAL OUTPUT:** Your output must be a single JSON object matching the final schedule schema, including the calculated \`predecessors\` and finalized resource/cost fields for each activity.
+6.  **NARRATIVE:** Write a concise narrative explaining your final decisions, referencing why you chose certain elements from your agents' proposals and the rationale for the final schedule's structure and resource allocation.
+7.  **SELF-CORRECTION & FEEDBACK:** If you are given feedback, you MUST correct all listed issues in your new attempt.`;
     
     const leaderModel = API_PROVIDER === 'GEMINI' ? MODELS.GEMINI.LEADER : MODELS.LM_STUDIO.LEADER;
     const projectDesc = getProjectDescriptionText(projectInput);
@@ -253,12 +273,17 @@ Feedback Details: "${userFeedback.text}"
 ${projectDesc}
 \`\`\`
 
-**Your Team's Proposals (Activities with Successor Suggestions):**
+**Supporting Documents for Context:**
+\`\`\`
+${supportingDocsContent || "No supporting documents provided."}
+\`\`\`
+
+**Your Team's Proposals (Activities with Successors and Resources):**
 ${agentSummaries}
 
 ${feedbackPrompt}
 
-Now, perform your duties. Analyze, select, construct the graph, and generate the single best, final, and validated schedule and narrative.`;
+Now, perform your duties. Analyze, select, construct the graph, finalize resources, and generate the single best, final, and validated schedule and narrative.`;
         
         try {
             const parsedJson = await callGemini(leaderModel, systemInstruction, userPrompt, FINAL_SCHEDULE_SCHEMA) as ScheduleResponse;
@@ -416,6 +441,7 @@ export const generateFinalSchedule = async (
     historicalData: string,
     fileName: string,
     projectInput: ProjectInput,
+    supportingDocs: SupportingDocument[],
     onProgressUpdate: (updates: ProgressUpdate[]) => void,
     onAgentOutputsReady: (outputs: AgentOutput[]) => void,
     options?: {
@@ -425,6 +451,20 @@ export const generateFinalSchedule = async (
 ): Promise<{ agentOutputs: AgentOutput[], finalSchedule: ScheduleResponse }> => {
     
     const { existingAgentOutputs, feedback } = options || {};
+
+    let supportingDocsContent = "";
+    for (const doc of supportingDocs) {
+        if (doc.category === 'Resource and Productivity database' || doc.category === 'BOQ + Package Price') {
+            try {
+                const content = await doc.file.text();
+                supportingDocsContent += `\n\n--- Supporting Document: ${doc.file.name} (Category: ${doc.category}) ---\n`;
+                supportingDocsContent += content.substring(0, 50000); // Truncate to prevent excessively large prompts
+                supportingDocsContent += `\n--- End of Document: ${doc.file.name} ---\n`;
+            } catch (e) {
+                console.error(`Could not read file ${doc.file.name}`, e);
+            }
+        }
+    }
     
     const contextData = API_PROVIDER === 'GEMINI' ? historicalData : await retrieveRelevantContext(historicalData, fileName, projectInput);
 
@@ -452,7 +492,7 @@ export const generateFinalSchedule = async (
             return (async () => {
                 onProgressUpdate([{ name: agentStepName, status: 'running' }]);
                 try {
-                    const result = await runLocalAgent(config.id, config.instruction, contextData, projectInput, config.model);
+                    const result = await runLocalAgent(config.id, config.instruction, contextData, supportingDocsContent, projectInput, config.model);
                     onProgressUpdate([{ name: agentStepName, status: 'completed' }]);
                     return { status: 'fulfilled' as const, value: result, config };
                 } catch (reason) {
@@ -498,7 +538,7 @@ export const generateFinalSchedule = async (
     }
     
     try {
-        const finalSchedule = await runLeaderAgent(contextData, projectInput, agentOutputs, onProgressUpdate, leaderGenerateStepName, feedback);
+        const finalSchedule = await runLeaderAgent(contextData, supportingDocsContent, projectInput, agentOutputs, onProgressUpdate, leaderGenerateStepName, feedback);
         return { agentOutputs: agentOutputs, finalSchedule };
     } catch(e) {
         throw e;
