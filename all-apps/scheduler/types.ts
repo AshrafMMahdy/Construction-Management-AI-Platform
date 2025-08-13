@@ -3,6 +3,11 @@ export interface Activity {
   name: string;
   duration: number;
   predecessors: string;
+  resourceGroupName?: string | null;
+  membersPerCrew?: number | null;
+  numberOfCrews?: number | null;
+  boqQuantity?: string | null;
+  packageCost?: string | null;
 }
 
 export interface GanttActivity extends Activity {
@@ -18,6 +23,14 @@ export interface ParsedPredecessor {
   id: number;
   type: DependencyType;
   lag: number;
+}
+
+export type SupportingDocumentCategory = 'BOQ + Package Price' | 'Resource and Productivity database' | 'Project Drawings';
+
+export interface SupportingDocument {
+  id: string;
+  file: File;
+  category: SupportingDocumentCategory | null;
 }
 
 
@@ -47,6 +60,11 @@ export interface AgentActivitySuggestion {
   name: string;
   duration: number;
   successorSuggestions: SuccessorSuggestion[];
+  resourceGroupName?: string | null;
+  membersPerCrew?: number | null;
+  numberOfCrews?: number | null;
+  boqQuantity?: string | null;
+  packageCost?: string | null;
 }
 
 export interface AgentOutput {
@@ -84,4 +102,16 @@ export interface SavedProject {
   createdAt: string;
   aiSchedulerData?: AiSchedulerData;
   [key: string]: any; // Allow other app data
+}
+
+export interface ChartDataPoint {
+  label: string;
+  value: number;
+  
+}
+
+export interface ChartData {
+  costSCurve: ChartDataPoint[];
+  resourceSCurve: ChartDataPoint[];
+  resourceDistribution: ChartDataPoint[];
 }
