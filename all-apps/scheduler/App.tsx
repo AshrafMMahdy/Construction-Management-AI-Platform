@@ -1,5 +1,6 @@
+
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Activity, AgentOutput, ProjectInput, ProjectFeatures, ProgressStep, ProgressUpdate, GanttActivity, SavedProject, AiSchedulerData } from './types';
+import { Activity, AgentOutput, ProjectInput, ProjectFeatures, ProgressStep, ProgressUpdate, GanttActivity, SavedProject, AiSchedulerData, SupportingDocument, ChartData } from './types';
 import FileUpload from './components/FileUpload';
 import ProjectForm from './components/ProjectForm';
 import ScheduleTable from './components/ScheduleTable';
@@ -10,18 +11,21 @@ import ProgressDisplay from './components/ProgressDisplay';
 import SavedProjects from './components/SavedProjects';
 import { generateFinalSchedule, getInitialSteps } from './services/aiService';
 import { parseDataAndExtractFeatures } from './utils/dataParser';
-import { WandIcon, DownloadIcon, UsersIcon, TableIcon, BarChartIcon, MessageSquareIcon, SaveIcon, PlusCircleIcon } from './components/IconComponents';
+import { WandIcon, DownloadIcon, UsersIcon, TableIcon, BarChartIcon, MessageSquareIcon, SaveIcon, PlusCircleIcon, TrendingUpIcon, LinkIcon, LinkOffIcon } from './components/IconComponents';
 import DatePicker from './components/DatePicker';
 import GanttChart from './components/GanttChart';
 import ConfirmationModal from './components/ConfirmationModal';
-import { calculateScheduleWithMetrics, countWorkdays } from './utils/scheduleCalculator';
+import { calculateScheduleWithMetrics, countWorkdays, calculateChartData } from './utils/scheduleCalculator';
 import { API_PROVIDER } from './config';
+import SupportingDocsUpload from './components/SupportingDocsUpload';
+import ChartsView from './components/ChartsView';
 
 const App: React.FC = () => {
   const [historicalData, setHistoricalData] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [projectFeatures, setProjectFeatures] = useState<ProjectFeatures | null>(null);
   const [projectName, setProjectName] = useState<string>('');
+  const [supportingDocs, setSupportingDocs] = useState<SupportingDocument[]>([]);
 
   const initialProjectInput: ProjectInput = {
     isNotInDb: false,
@@ -42,8 +46,11 @@ const App: React.FC = () => {
 
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [ganttData, setGanttData] = useState<GanttActivity[] | null>(null);
-  const [view, setView] = useState<'schedule' | 'gantt'>('schedule');
+  const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [view, setView] = useState<'schedule' | 'gantt' | 'charts'>('schedule');
   const [scheduleFilter, setScheduleFilter] = useState<'all' | 'critical'>('all');
+  const [showLinks, setShowLinks] = useState<boolean>(true);
+
 
   const [showFeedbackForm, setShowFeedbackForm] = useState<boolean>(false);
   const [feedbackCategory, setFeedbackCategory] = useState<string>('General Feedback');
@@ -82,12 +89,14 @@ const App: React.FC = () => {
     setGeneratedNarrative(null);
     setProgress([]);
     setGanttData(null);
+    setChartData(null);
     setTotalProjectDuration(null);
     setView('schedule');
     setScheduleFilter('all');
     setShowFeedbackForm(false);
     setFeedbackText('');
     setIsRegeneration(false);
+    setShowLinks(true);
   }, []);
 
   const resetAllState = useCallback(() => {
@@ -98,6 +107,7 @@ const App: React.FC = () => {
     setFileName(null);
     setProjectInput(initialProjectInput);
     setProjectName('');
+    setSupportingDocs([]);
     setStartDate(new Date().toISOString().split('T')[0]);
     setCurrentProjectId(null);
   }, [clearGeneratedData, initialProjectInput]);
@@ -115,6 +125,7 @@ const App: React.FC = () => {
     setProjectName('');
     setStartDate(new Date().toISOString().split('T')[0]);
     setCurrentProjectId(null);
+    setSupportingDocs([]);
     
     // Reset project input form to defaults based on existing features
     const defaultSelections: Record<string, string> = {};
@@ -132,6 +143,7 @@ const App: React.FC = () => {
   const handleFileLoad = useCallback((content: string, name: string) => {
     clearGeneratedData();
     setError(null);
+    setSupportingDocs([]); // Clear supporting docs when new primary data is loaded
 
     // If no project is currently loaded, also clear the project name field
     // to signify we are starting a completely new project.
@@ -162,6 +174,10 @@ const App: React.FC = () => {
     }
   }, [clearGeneratedData, currentProjectId, initialProjectInput]);
   
+  const handleSupportingDocsChange = (docs: SupportingDocument[]) => {
+      setSupportingDocs(docs);
+  };
+
   const calculateAndSetDuration = (scheduleData: GanttActivity[]) => {
       if (!scheduleData || scheduleData.length === 0) {
         setTotalProjectDuration(null);
@@ -217,6 +233,7 @@ const App: React.FC = () => {
           historicalData,
           fileName,
           projectInput,
+          supportingDocs,
           handleProgressUpdate,
           (outputs) => setAgentOutputs(outputs)
       );
@@ -228,6 +245,7 @@ const App: React.FC = () => {
       if (finalSchedule.schedule && finalSchedule.schedule.length > 0) {
         const calculatedGanttData = calculateScheduleWithMetrics(finalSchedule.schedule, startDate);
         setGanttData(calculatedGanttData);
+        setChartData(calculateChartData(calculatedGanttData));
         calculateAndSetDuration(calculatedGanttData);
         setView('gantt');
       }
@@ -269,6 +287,7 @@ const App: React.FC = () => {
           historicalData,
           fileName,
           projectInput,
+          supportingDocs,
           handleProgressUpdate,
           () => {}, // Agent outputs are already set, no need for this callback
           { 
@@ -283,6 +302,7 @@ const App: React.FC = () => {
       if (finalSchedule.schedule && finalSchedule.schedule.length > 0) {
         const calculatedGanttData = calculateScheduleWithMetrics(finalSchedule.schedule, startDate);
         setGanttData(calculatedGanttData);
+        setChartData(calculateChartData(calculatedGanttData));
         calculateAndSetDuration(calculatedGanttData);
         setView('gantt');
       }
@@ -314,6 +334,7 @@ const App: React.FC = () => {
       setIsLoading(true);
       setError(null);
   
+      // NOTE: Supporting documents are not saved for now to avoid complexity with file serialization.
       const aiSchedulerData: AiSchedulerData = {
           historicalData,
           fileName,
@@ -410,6 +431,7 @@ const App: React.FC = () => {
         setCurrentProjectId(projectToLoad.id);
         setError(`Project "${projectToLoad.name}" does not contain AI Scheduler data. This file might be from another application or an older version. Please upload historical data to generate a new schedule for this project.`);
         setProjectInput(initialProjectInput); // Reset form for new input
+        setSupportingDocs([]); // Also clear supporting docs
         return; 
     }
     
@@ -430,9 +452,13 @@ const App: React.FC = () => {
         setGeneratedSchedule(schedulerData.generatedSchedule || null);
         setGeneratedNarrative(schedulerData.generatedNarrative || null);
         
+        // Supporting documents are not saved/loaded for simplicity. Reset them.
+        setSupportingDocs([]);
+        
         if (schedulerData.generatedSchedule && schedulerData.generatedSchedule.length > 0) {
             const calculatedGanttData = calculateScheduleWithMetrics(schedulerData.generatedSchedule, schedulerData.startDate);
             setGanttData(calculatedGanttData);
+            setChartData(calculateChartData(calculatedGanttData));
             calculateAndSetDuration(calculatedGanttData);
             setView('gantt');
         }
@@ -518,16 +544,35 @@ const App: React.FC = () => {
 
   const handleDownloadCSV = () => {
     if (!ganttData) return;
-    const headers = ["ID", "Name", "Duration", "Total Float", "Is Critical", "Predecessors", "Start Date", "End Date"];
+    const headers = [
+        "ID", "Name", "Resource Group", "Members per Crew", "# Crews", "BOQ Quantity", "Package Cost", 
+        "Duration", "Total Float", "Is Critical", "Predecessors", "Start Date", "End Date"
+    ];
+
     const toCsvField = (value: any) => {
-        const str = String(value);
+        const str = String(value ?? '');
         if (str.includes(',') || str.includes('"') || str.includes('\n')) {
             return `"${str.replace(/"/g, '""')}"`;
         }
         return str;
     };
+
     const rows = ganttData.map(act => 
-        [act.id, toCsvField(act.name), act.duration, act.totalFloat, act.isCritical, toCsvField(act.predecessors), act.startDate.toISOString().split('T')[0], act.endDate.toISOString().split('T')[0]].join(',')
+        [
+            act.id, 
+            toCsvField(act.name),
+            toCsvField(act.resourceGroupName),
+            act.membersPerCrew ?? '',
+            act.numberOfCrews ?? '',
+            toCsvField(act.boqQuantity),
+            toCsvField(act.packageCost),
+            act.duration, 
+            act.totalFloat, 
+            act.isCritical, 
+            toCsvField(act.predecessors), 
+            act.startDate.toISOString().split('T')[0], 
+            act.endDate.toISOString().split('T')[0]
+        ].join(',')
     );
     const csvContent = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -553,6 +598,19 @@ const App: React.FC = () => {
 
   const isButtonDisabled = isLoading || !historicalData || (projectInput.isNotInDb && !projectInput.description.trim());
   const hasRun = progress.length > 0;
+
+  const renderCurrentView = () => {
+    switch(view) {
+        case 'gantt':
+            return <GanttChart activities={ganttData!} filter={scheduleFilter} showLinks={showLinks} />;
+        case 'schedule':
+            return filteredTableData && <ScheduleTable activities={filteredTableData} />;
+        case 'charts':
+            return chartData && <ChartsView data={chartData} />;
+        default:
+            return null;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-brand-primary font-sans">
@@ -580,6 +638,12 @@ const App: React.FC = () => {
           
           <div className="lg:col-span-4 bg-brand-secondary rounded-xl shadow-2xl p-6 h-fit flex flex-col gap-8">
             <FileUpload onFileLoad={handleFileLoad} fileName={fileName} disabled={isLoading} />
+
+            <SupportingDocsUpload
+                docs={supportingDocs}
+                onDocsChange={handleSupportingDocsChange}
+                disabled={isLoading}
+            />
             
             <SavedProjects
                 projects={savedProjects}
@@ -592,43 +656,42 @@ const App: React.FC = () => {
             />
 
             {historicalData && (
-                 <div className="w-full">
-                    <h3 className="text-lg font-semibold text-brand-accent mb-2">2. Project Name</h3>
-                    <input
-                        type="text"
-                        value={projectName}
-                        onChange={(e) => setProjectName(e.target.value)}
-                        placeholder="Enter a unique name for this project"
-                        disabled={isLoading}
-                        className="w-full p-2 bg-brand-primary border-2 border-brand-muted rounded-md focus:outline-none focus:border-brand-accent transition-colors text-brand-light placeholder-brand-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                        aria-label="New project name"
-                    />
-                    
-                    {currentProjectId && (
-                      <div className="mt-4 p-3 bg-brand-primary/50 rounded-lg border border-brand-muted/30">
-                          <button 
-                              onClick={handleResetForNewProject} 
-                              className="w-full text-center text-sm font-semibold text-red-400 hover:text-red-300 transition-colors"
-                              aria-label="Eject current project"
-                          >
-                              Eject Current Project
-                          </button>
-                          <p className="text-xs text-brand-muted mt-1 text-center">
-                              Clears the generated schedule and inputs to let you start a new one.
-                          </p>
-                      </div>
-                    )}
-                 </div>
-            )}
-            
-            {historicalData && (
-                <>
+                 <>
+                    <div className="w-full">
+                        <h3 className="text-lg font-semibold text-brand-accent mb-2">3. Project Name</h3>
+                        <input
+                            type="text"
+                            value={projectName}
+                            onChange={(e) => setProjectName(e.target.value)}
+                            placeholder="Enter a unique name for this project"
+                            disabled={isLoading}
+                            className="w-full p-2 bg-brand-primary border-2 border-brand-muted rounded-md focus:outline-none focus:border-brand-accent transition-colors text-brand-light placeholder-brand-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="New project name"
+                        />
+                        
+                        {currentProjectId && (
+                        <div className="mt-4 p-3 bg-brand-primary/50 rounded-lg border border-brand-muted/30">
+                            <button 
+                                onClick={handleResetForNewProject} 
+                                className="w-full text-center text-sm font-semibold text-red-400 hover:text-red-300 transition-colors"
+                                aria-label="Eject current project"
+                            >
+                                Eject Current Project
+                            </button>
+                            <p className="text-xs text-brand-muted mt-1 text-center">
+                                Clears the generated schedule and inputs to let you start a new one.
+                            </p>
+                        </div>
+                        )}
+                    </div>
+
                     <DatePicker 
-                        label="Expected Start Date"
+                        label="4. Expected Start Date"
                         selectedDate={startDate}
                         onChange={setStartDate}
                         disabled={isLoading}
                     />
+
                     {projectFeatures && (
                         <ProjectForm 
                             projectInput={projectInput} 
@@ -637,8 +700,9 @@ const App: React.FC = () => {
                             disabled={isLoading} 
                         />
                     )}
-                </>
+                 </>
             )}
+            
             <div className="mt-2">
               <button
                 onClick={handleGenerateClick}
@@ -669,14 +733,16 @@ const App: React.FC = () => {
                   <div className="flex justify-between items-center mb-2 mt-4 flex-wrap gap-y-2">
                     <h2 className="text-2xl font-bold text-brand-accent">Final Synthesized Schedule</h2>
                      <div className="flex items-center gap-2">
-                        <div className="flex items-center bg-brand-primary p-1 rounded-lg text-sm">
-                            <button onClick={() => setScheduleFilter('all')} className={`px-3 py-1 rounded-md transition-colors ${scheduleFilter === 'all' ? 'bg-brand-accent text-brand-primary font-semibold' : 'hover:bg-brand-muted/20'}`}>
-                                All Activities
-                            </button>
-                            <button onClick={() => setScheduleFilter('critical')} className={`px-3 py-1 rounded-md transition-colors ${scheduleFilter === 'critical' ? 'bg-brand-accent text-brand-primary font-semibold' : 'hover:bg-brand-muted/20'}`}>
-                                Critical Path
-                            </button>
-                        </div>
+                        {view !== 'charts' && (
+                            <div className="flex items-center bg-brand-primary p-1 rounded-lg text-sm">
+                                <button onClick={() => setScheduleFilter('all')} className={`px-3 py-1 rounded-md transition-colors ${scheduleFilter === 'all' ? 'bg-brand-accent text-brand-primary font-semibold' : 'hover:bg-brand-muted/20'}`}>
+                                    All Activities
+                                </button>
+                                <button onClick={() => setScheduleFilter('critical')} className={`px-3 py-1 rounded-md transition-colors ${scheduleFilter === 'critical' ? 'bg-brand-accent text-brand-primary font-semibold' : 'hover:bg-brand-muted/20'}`}>
+                                    Critical Path
+                                </button>
+                            </div>
+                        )}
                         <div className="flex items-center bg-brand-primary p-1 rounded-lg">
                             <button onClick={() => setView('gantt')} className={`p-2 rounded-md transition-colors ${view === 'gantt' ? 'bg-brand-accent text-brand-primary' : 'hover:bg-brand-muted/20'}`} aria-label="Gantt Chart View">
                                 <BarChartIcon className="w-5 h-5" />
@@ -684,6 +750,21 @@ const App: React.FC = () => {
                             <button onClick={() => setView('schedule')} className={`p-2 rounded-md transition-colors ${view === 'schedule' ? 'bg-brand-accent text-brand-primary' : 'hover:bg-brand-muted/20'}`} aria-label="Table View">
                                 <TableIcon className="w-5 h-5"/>
                             </button>
+                             <button onClick={() => setView('charts')} className={`p-2 rounded-md transition-colors ${view === 'charts' ? 'bg-brand-accent text-brand-primary' : 'hover:bg-brand-muted/20'}`} aria-label="Charts View">
+                                <TrendingUpIcon className="w-5 h-5"/>
+                            </button>
+                            {view === 'gantt' && (
+                                <>
+                                    <div className="border-l h-5 border-brand-muted/30 mx-1"></div>
+                                    <button
+                                        onClick={() => setShowLinks(!showLinks)}
+                                        className="p-2 rounded-md transition-colors hover:bg-brand-muted/20"
+                                        title={showLinks ? "Hide Activity Links" : "Show Activity Links"}
+                                    >
+                                        {showLinks ? <LinkIcon className="w-5 h-5 text-brand-accent"/> : <LinkOffIcon className="w-5 h-5 text-brand-muted"/>}
+                                    </button>
+                                </>
+                            )}
                         </div>
                         <button
                             onClick={handleDownloadCSV}
@@ -700,11 +781,9 @@ const App: React.FC = () => {
                       Overall Project Duration: {totalProjectDuration} workdays
                     </h3>
                   )}
-                  {view === 'gantt' ? (
-                     <GanttChart activities={ganttData} filter={scheduleFilter} />
-                  ) : (
-                     filteredTableData && <ScheduleTable activities={filteredTableData} />
-                  )}
+                  
+                  {renderCurrentView()}
+
                 </div>
                 {generatedNarrative && (
                   <div>
