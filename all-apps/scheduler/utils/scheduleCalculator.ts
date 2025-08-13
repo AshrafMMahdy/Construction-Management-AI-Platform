@@ -1,5 +1,5 @@
 
-import { GanttActivity, Activity, ParsedPredecessor, DependencyType } from '../types';
+import { GanttActivity, Activity, ParsedPredecessor, DependencyType, ChartData, ChartDataPoint } from '../types';
 
 function addWorkdays(startDate: Date, days: number): Date {
   const newDate = new Date(startDate.getTime());
@@ -191,4 +191,95 @@ export function calculateScheduleWithMetrics(activities: Activity[], projectStar
     }
 
     return allActivities.sort((a,b) => a.startDate.getTime() - b.startDate.getTime() || a.id - b.id);
+}
+
+// --- CHART DATA CALCULATION ---
+
+const parseCurrency = (value: string | null | undefined): number => {
+    if (!value) return 0;
+    // Remove currency symbols, thousands separators, and trim whitespace
+    const cleaned = String(value).replace(/[€$,\s]/g, '');
+    return parseFloat(cleaned) || 0;
+};
+
+
+export function calculateChartData(activities: GanttActivity[]): ChartData {
+    const emptyData: ChartData = {
+        costSCurve: [],
+        resourceSCurve: [],
+        resourceDistribution: []
+    };
+    if (!activities || activities.length === 0) return emptyData;
+    
+    const validActivities = activities.filter(a => a.startDate.getTime() > 0 && a.endDate.getTime() > 0);
+    if(validActivities.length === 0) return emptyData;
+
+    const projectStart = new Date(Math.min(...validActivities.map(a => a.startDate.getTime())));
+    const projectEnd = new Date(Math.max(...validActivities.map(a => a.endDate.getTime())));
+
+    // --- 1. Cost S-Curve (Monthly) ---
+    const monthlyCosts: { [key: string]: number } = {};
+    for (const activity of validActivities) {
+        const cost = parseCurrency(activity.packageCost);
+        if (cost > 0) {
+            // Attribute cost to the month the activity ends
+            const endMonth = activity.endDate.toLocaleString('default', { month: 'short', year: 'numeric' });
+            monthlyCosts[endMonth] = (monthlyCosts[endMonth] || 0) + cost;
+        }
+    }
+    
+    const costSCurve: ChartDataPoint[] = [];
+    let cumulativeCost = 0;
+    const sortedMonths = Object.keys(monthlyCosts).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    
+    for (const month of sortedMonths) {
+        cumulativeCost += monthlyCosts[month];
+        costSCurve.push({ label: month, value: cumulativeCost });
+    }
+
+    // --- 2. & 3. Resource Curves (Weekly) ---
+    const weeklyResources: { [key: string]: number } = {};
+    let currentWeekStart = new Date(projectStart);
+    // Align to start of the week (Monday)
+    const dayOfWeek = currentWeekStart.getDay();
+    const diff = currentWeekStart.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // adjust when day is sunday
+    currentWeekStart.setDate(diff);
+
+
+    let weekCounter = 1;
+    while(currentWeekStart <= projectEnd) {
+        const currentWeekEnd = new Date(currentWeekStart);
+        currentWeekEnd.setDate(currentWeekEnd.getDate() + 6);
+        
+        let totalCrewsThisWeek = 0;
+        for (const activity of validActivities) {
+            // Check for overlap between activity duration and the current week
+            const activityStartsBeforeWeekEnds = activity.startDate <= currentWeekEnd;
+            const activityEndsAfterWeekStarts = activity.endDate >= currentWeekStart;
+            if (activityStartsBeforeWeekEnds && activityEndsAfterWeekStarts) {
+                totalCrewsThisWeek += activity.numberOfCrews || 0;
+            }
+        }
+        
+        const weekLabel = `W${weekCounter}`;
+        weeklyResources[weekLabel] = totalCrewsThisWeek;
+
+        currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+        weekCounter++;
+    }
+
+    const resourceDistribution: ChartDataPoint[] = Object.entries(weeklyResources).map(([label, value]) => ({ label, value }));
+    
+    const resourceSCurve: ChartDataPoint[] = [];
+    let cumulativeResources = 0;
+    for(const point of resourceDistribution) {
+        cumulativeResources += point.value;
+        resourceSCurve.push({ label: point.label, value: cumulativeResources });
+    }
+
+    return {
+        costSCurve,
+        resourceSCurve,
+        resourceDistribution
+    };
 }
