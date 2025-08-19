@@ -154,8 +154,14 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ results }) => {
                     <td className={`px-6 py-4 whitespace-pre-wrap text-sm text-gray-300 break-words align-top border-l-4 ${getStatusBorderClass(result.status)} space-y-3`}>
                         {result.portion_to_modify && (
                             <div>
-                              <p className="font-semibold text-gray-200 text-xs uppercase tracking-wider">Suggested Modification</p>
-                              <p className="mt-1 bg-yellow-500/10 p-2 rounded-md text-yellow-200">{result.portion_to_modify}</p>
+                                <p className="font-semibold text-gray-200 text-xs uppercase tracking-wider">To be modified</p>
+                                <p className="mt-1 bg-red-500/20 p-2 rounded-md text-red-300 font-mono">{result.portion_to_modify}</p>
+                            </div>
+                        )}
+                        {result.suggested_modification_text && (
+                            <div>
+                                <p className="font-semibold text-gray-200 text-xs uppercase tracking-wider">Suggested Modification</p>
+                                <p className="mt-1 bg-green-500/20 p-2 rounded-md text-green-300 font-mono">{result.suggested_modification_text}</p>
                             </div>
                         )}
                         <div>
