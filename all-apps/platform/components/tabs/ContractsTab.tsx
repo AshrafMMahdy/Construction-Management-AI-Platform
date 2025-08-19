@@ -1,61 +1,53 @@
 import React from 'react';
 import { Project, AnalysisResult } from '../../types';
-import { 
-  DocumentTextIcon, 
-  ArrowTopRightOnSquareIcon, 
-  CheckCircleIcon, 
-  XCircleIcon, 
-  PencilSquareIcon,
-  ExclamationTriangleIcon 
-} from '../Icons';
+import { DocumentTextIcon, ArrowTopRightOnSquareIcon, CheckCircleIcon, XCircleIcon, PencilSquareIcon, QuestionMarkCircleIcon } from '../Icons';
 import { APP_URLS } from '../../constants';
 
 interface ContractsTabProps {
   project: Project;
 }
 
-const StatusBadge: React.FC<{ status: AnalysisResult['status'] }> = ({ status }) => {
+const StatusPill: React.FC<{ status: AnalysisResult['status'] }> = ({ status }) => {
   const statusConfig = {
     'Accepted': {
-      icon: <CheckCircleIcon className="w-4 h-4 mr-1.5" />,
+      icon: <CheckCircleIcon className="w-5 h-5 mr-2" />,
       color: 'text-green-400',
-      text: 'Accepted',
+      bg: 'bg-green-500/10',
     },
     'Rejected': {
-      icon: <XCircleIcon className="w-4 h-4 mr-1.5" />,
+      icon: <XCircleIcon className="w-5 h-5 mr-2" />,
       color: 'text-red-400',
-      text: 'Rejected',
+      bg: 'bg-red-500/10',
     },
     'Acceptable subject to modification': {
-      icon: <PencilSquareIcon className="w-4 h-4 mr-1.5" />,
-      color: 'text-yellow-400',
-      text: 'Modify',
+      icon: <PencilSquareIcon className="w-5 h-5 mr-2" />,
+      color: 'text-amber-400',
+      bg: 'bg-amber-500/10',
     },
     'Requires Review (Inferred)': {
-      icon: <ExclamationTriangleIcon className="w-4 h-4 mr-1.5" />,
-      color: 'text-orange-400',
-      text: 'Review',
+      icon: <QuestionMarkCircleIcon className="w-5 h-5 mr-2" />,
+      color: 'text-yellow-400',
+      bg: 'bg-yellow-500/10',
     },
   };
 
   const config = statusConfig[status];
 
-  if (!config) return null;
-
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${config.color} bg-opacity-10 bg-current`}>
+    <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-sm font-medium ${config.bg} ${config.color}`}>
       {config.icon}
-      {config.text}
+      {status}
     </span>
   );
 };
+
 
 const ContractsTab: React.FC<ContractsTabProps> = ({ project }) => {
   const hasContractData = project.analysisResults && project.analysisResults.length > 0;
 
   return (
     <div className="space-y-8 animate-slide-in-up">
-      <div className="bg-base-100 p-6 rounded-lg shadow-lg border border-base-300">
+       <div className="bg-base-100 p-6 rounded-lg shadow-lg border border-base-300">
         <h3 className="text-xl font-bold text-base-content mb-4 flex items-center">
             <DocumentTextIcon className="w-6 h-6 mr-2 text-brand-primary" />
             Manage Contracts
@@ -75,40 +67,65 @@ const ContractsTab: React.FC<ContractsTabProps> = ({ project }) => {
       </div>
 
       {hasContractData ? (
-        <div className="bg-base-100 rounded-lg shadow-lg border border-base-300">
-          <h3 className="text-xl font-bold text-base-content p-6 flex items-center">
-            AI Contract Analysis Results
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm text-left text-base-content">
-              <thead className="bg-base-300 text-xs text-base-content-secondary uppercase">
-                <tr>
-                  <th scope="col" className="px-6 py-3 w-24">Clause #</th>
-                  <th scope="col" className="px-6 py-3 w-40">Status</th>
-                  <th scope="col" className="px-6 py-3">Clause Text</th>
-                  <th scope="col" className="px-6 py-3">Justification</th>
-                </tr>
-              </thead>
-              <tbody>
-                {project.analysisResults!.map((result, index) => (
-                  <tr key={index} className="border-b border-base-300 hover:bg-base-200/50">
-                    <td className="px-6 py-4 font-medium align-top">{result.contract_clause_index}</td>
-                    <td className="px-6 py-4 align-top">
-                      <StatusBadge status={result.status} />
-                    </td>
-                    <td className="px-6 py-4 whitespace-pre-wrap align-top">{result.contract_clause_text}</td>
-                    <td className="px-6 py-4 whitespace-pre-wrap align-top text-base-content-secondary">{result.justification}</td>
+        <div className="space-y-8">
+          {project.contractFile && (
+            <div className="bg-base-100 p-6 rounded-lg shadow-lg border border-base-300">
+              <h3 className="text-xl font-bold text-base-content mb-2">Contract Document</h3>
+              <p className="text-base-content-secondary">
+                <span className="font-semibold text-base-content">File Name:</span> {project.contractFile.name}
+              </p>
+            </div>
+          )}
+          
+          <div className="bg-base-100 rounded-lg shadow-lg border border-base-300">
+            <h3 className="text-xl font-bold text-base-content p-6">
+              AI Analysis Results
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm text-left text-base-content">
+                <thead className="bg-base-300 text-xs text-base-content-secondary uppercase">
+                  <tr>
+                    <th scope="col" className="px-6 py-3 w-1/4">Status</th>
+                    <th scope="col" className="px-6 py-3 w-3/4">Clause & Justification</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-base-300">
+                  {project.analysisResults?.map((result, index) => (
+                    <tr key={index} className="hover:bg-base-200/50">
+                      <td className="px-6 py-4 align-top">
+                        <StatusPill status={result.status} />
+                      </td>
+      
+                      <td className="px-6 py-4">
+                        <p className="font-mono text-xs text-base-content-secondary bg-base-200 p-3 rounded-md border border-base-300">
+                          {result.contract_clause_text}
+                        </p>
+                        <p className="mt-3 text-base-content">{result.justification}</p>
+                        {result.portion_to_modify && (
+                          <div className="mt-3 text-sm bg-red-900/40 p-3 rounded-md border border-red-500/30">
+                            <span className="font-semibold text-red-400">To be modified: </span>
+                            <span className="font-mono text-red-400">{result.portion_to_modify}</span>
+                          </div>
+                        )}
+                        {result.suggested_modification_text && (
+                          <div className="mt-2 text-sm bg-green-900/40 p-3 rounded-md border border-green-500/30">
+                            <span className="font-semibold text-green-400">Suggested Modification: </span>
+                            <span className="font-mono text-green-400">{result.suggested_modification_text}</span>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ) : (
         <div className="text-center py-16 bg-base-100 rounded-lg border-2 border-dashed border-base-300">
           <DocumentTextIcon className="mx-auto h-12 w-12 text-base-content-secondary" />
           <h3 className="mt-2 text-lg font-medium text-base-content">No Contract Data Available</h3>
-          <p className="mt-1 text-sm text-base-content-secondary">This project has no contract analysis results. Analyze a contract in the Contracts app to see data here.</p>
+          <p className="mt-1 text-sm text-base-content-secondary">This project does not contain contract analysis results. Analyze a contract in the Contracts App to see data here.</p>
         </div>
       )}
     </div>
