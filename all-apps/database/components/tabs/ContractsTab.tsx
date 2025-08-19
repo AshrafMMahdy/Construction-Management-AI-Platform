@@ -102,9 +102,15 @@ const ContractsTab: React.FC<ContractsTabProps> = ({ project }) => {
                         </p>
                         <p className="mt-3 text-base-content">{result.justification}</p>
                         {result.portion_to_modify && (
-                          <div className="mt-3 text-sm bg-base-200 p-3 rounded-md border border-amber-500/30">
-                            <span className="font-semibold text-amber-400">Modification Suggested: </span>
-                            <span className="font-mono text-amber-400">{result.portion_to_modify}</span>
+                          <div className="mt-3 text-sm bg-red-900/40 p-3 rounded-md border border-red-500/30">
+                            <span className="font-semibold text-red-400">To be modified: </span>
+                            <span className="font-mono text-red-400">{result.portion_to_modify}</span>
+                          </div>
+                        )}
+                        {result.suggested_modification_text && (
+                          <div className="mt-2 text-sm bg-green-900/40 p-3 rounded-md border border-green-500/30">
+                            <span className="font-semibold text-green-400">Suggested Modification: </span>
+                            <span className="font-mono text-green-400">{result.suggested_modification_text}</span>
                           </div>
                         )}
                       </td>
