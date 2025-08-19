@@ -40,6 +40,7 @@ export interface AnalysisResult {
   justification: string;
   matched_database_clause_id?: string | number | null;
   portion_to_modify?: string;
+  suggested_modification_text?: string;
 }
 
 export interface SearchResult {
