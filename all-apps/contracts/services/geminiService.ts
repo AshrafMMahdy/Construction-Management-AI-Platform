@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, Clause, SearchResult, ContractContent } from "../types";
 
@@ -34,7 +35,11 @@ const analysisResultSchema = {
       },
       portion_to_modify: {
           type: Type.STRING,
-          description: "If status is 'Acceptable subject to modification', this MUST contain the specific text snippet from the new contract's clause that requires changes. Otherwise, this field should be omitted."
+          description: "If status is 'Acceptable subject to modification', this MUST contain the specific text snippet from the new contract's clause that requires changes. This is the text TO BE MODIFIED. Otherwise, this field should be omitted."
+      },
+      suggested_modification_text: {
+          type: Type.STRING,
+          description: "If status is 'Acceptable subject to modification', this MUST contain the corrected text or value that the 'portion_to_modify' should be changed TO, based on the matched database clause. Otherwise, this field should be omitted."
       },
       justification: {
         type: Type.STRING,
@@ -95,7 +100,9 @@ export const analyzeContract = async (contractContent: ContractContent, dbClause
         - 'contract_clause_text': The full, exact text of the clause you extracted.
         - Compare this clause to the master database and determine its status ('Accepted', 'Rejected', 'Acceptable subject to modification', 'Requires Review (Inferred)').
         - 'matched_database_clause_id': The 'id' of the matched database clause. This MUST be null if status is 'Requires Review (Inferred)'.
-        - 'portion_to_modify': If status is 'Acceptable subject to modification', this MUST contain the exact text snippet from the new contract's clause that requires changes. Otherwise, omit this field.
+        - 'portion_to_modify': If status is 'Acceptable subject to modification', this MUST contain the exact text snippet from the new contract that requires changes. This is the text TO BE modified.
+        - 'suggested_modification_text': If status is 'Acceptable subject to modification', this MUST contain the corrected text or value that 'portion_to_modify' should be changed TO, based on the matched database clause.
+        - For all other statuses, both 'portion_to_modify' and 'suggested_modification_text' MUST be omitted.
         - 'justification': A detailed justification for the status. For 'Requires Review (Inferred)', explain why no match was found and infer the company's likely position based on related database clauses.`;
     
     const imageParts = contractContent.pages.map(page => ({
@@ -129,7 +136,7 @@ export const analyzeContract = async (contractContent: ContractContent, dbClause
         - Compare the new contract's clause against the matched database clause and its annotation/content.
         - Assign a status: 'Accepted', 'Acceptable subject to modification', or 'Rejected'.
         - Provide the ID of the matched database clause in 'matched_database_clause_id'.
-        - If the status is 'Acceptable subject to modification', you MUST populate 'portion_to_modify' with the exact text snippet from the new contract that needs changing.
+        - If the status is 'Acceptable subject to modification', you MUST populate 'portion_to_modify' with the exact text snippet that needs changing AND populate 'suggested_modification_text' with what that snippet should be changed TO, based on the matched database clause.
     4.  **If NO direct or strong match is found in the database:**
         - The clause from the new contract is considered new or unrecognized.
         - You MUST assign the status 'Requires Review (Inferred)'.
@@ -139,6 +146,7 @@ export const analyzeContract = async (contractContent: ContractContent, dbClause
             c) Summarize the company's position on these related clauses.
             d) Use this information to infer a risk level or recommended action for the new clause.
         - The 'matched_database_clause_id' MUST be null.
+        - Both 'portion_to_modify' and 'suggested_modification_text' MUST be omitted.
     5.  Provide a clear 'justification' for every determination.
     6.  Return a JSON array of result objects. **Crucially, your response array must have exactly one object for every clause in the input new contract array, and they must be in the same order.**
     `;
