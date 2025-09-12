@@ -83,8 +83,10 @@ const App: React.FC = () => {
     fetchProjects();
   }, []);
 
-  const clearGeneratedData = useCallback(() => {
-    setAgentOutputs(null);
+  const clearGeneratedData = useCallback((options: { keepAgentOutputs?: boolean, keepFeedbackText?: boolean } = {}) => {
+    if (!options.keepAgentOutputs) {
+      setAgentOutputs(null);
+    }
     setGeneratedSchedule(null);
     setGeneratedNarrative(null);
     setProgress([]);
@@ -94,7 +96,9 @@ const App: React.FC = () => {
     setView('schedule');
     setScheduleFilter('all');
     setShowFeedbackForm(false);
-    setFeedbackText('');
+    if (!options.keepFeedbackText) {
+        setFeedbackText('');
+    }
     setIsRegeneration(false);
     setShowLinks(true);
   }, []);
@@ -268,8 +272,7 @@ const App: React.FC = () => {
     }
     
     setError(null);
-    clearGeneratedData();
-    setShowFeedbackForm(false); // Hide the form after submission
+    clearGeneratedData({ keepAgentOutputs: true, keepFeedbackText: true });
     
     setIsLoading(true);
     setIsRegeneration(true);
